@@ -7,9 +7,9 @@ from pathlib import Path
 import re
 from urllib.parse import urlparse
 
-import httpx
 import yaml
 
+from segretario.connectors.web_client import WebConnector
 from segretario.vault.adapter import VaultAdapter
 
 
@@ -26,6 +26,7 @@ def fetch_link(
     *,
     save_dir: str = "raw/articles",
     timeout_seconds: float = 20.0,
+    connector: WebConnector | None = None,
 ) -> LinkFetchResult:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -37,10 +38,10 @@ def fetch_link(
     if relative_save_dir == "raw/elaborati" or relative_save_dir.startswith("raw/elaborati/"):
         raise ValueError("link fetch cannot save into raw/elaborati")
 
-    response = httpx.get(url, timeout=timeout_seconds, follow_redirects=True)
-    response.raise_for_status()
+    connector = connector or WebConnector()
+    response = connector.fetch_url(url, timeout_seconds=timeout_seconds)
 
-    content_type = response.headers.get("content-type", "")
+    content_type = response.content_type
     markdown = _to_markdown(response.text, content_type=content_type)
     title = _extract_title(markdown, parsed.path)
     slug = _slugify(title)

@@ -28,6 +28,7 @@ uv run segretario vault check
 uv run segretario search "topic"
 uv run segretario query "question"
 uv run segretario link "https://example.com/article"
+uv run segretario web "public research query"
 uv run segretario lint wiki
 uv run segretario stats
 ```
@@ -42,6 +43,12 @@ Fetch and ingest a public link for Phase 4:
 
 ```powershell
 uv run segretario link "https://example.com/article" --ingest
+```
+
+Prepare a privacy-safe web query from private context:
+
+```powershell
+uv run segretario web "private-context query" --private-context --projection "privacy-safe query"
 ```
 
 ## Safety Model

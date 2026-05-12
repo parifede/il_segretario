@@ -311,6 +311,53 @@ def link(
         typer.echo(f"{action}: {output['path']}")
 
 
+@app.command()
+def web(
+    query: str,
+    private_context: bool = typer.Option(
+        False,
+        "--private-context",
+        help="Mark the query as derived from private vault context.",
+    ),
+    projection: str | None = typer.Option(
+        None,
+        "--projection",
+        help="Privacy-safe projection to use instead of the raw private query.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Prepare a privacy-safe web query payload."""
+    settings = load_settings(config_path=config)
+    if not settings.web.enabled:
+        typer.echo("web is disabled")
+        raise typer.Exit(1)
+
+    context_privacy = "private" if private_context else "public"
+    action = "web.public_query" if not private_context or projection else "web.private_context_query"
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="web",
+            payload={
+                "action": "web.query",
+                "query": query,
+                "context_privacy": context_privacy,
+                "projection": projection,
+            },
+            risk="low" if action == "web.public_query" else "medium",
+            action=action,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    typer.echo(f"web query: {result.output['query']}")
+
+
 def _build_core(settings) -> SegretarioCore:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -327,6 +374,7 @@ def _build_core(settings) -> SegretarioCore:
                 "lint.wiki": MaintenanceAgent(),
                 "ingest": IngestAgent(),
                 "link": ResearchAgent(),
+                "web": ResearchAgent(),
                 "meta.index.ensure": WikiMaintainerAgent(),
                 "meta.log.append": WikiMaintainerAgent(),
             }
