@@ -6,7 +6,7 @@ from datetime import date
 import re
 from pathlib import Path
 
-from segretario.vault.frontmatter import parse_frontmatter
+from segretario.vault.frontmatter import parse_frontmatter, render_frontmatter
 from segretario.vault.paths import classify_vault_path
 from segretario.vault.wikilinks import extract_wikilink_targets
 
@@ -25,12 +25,55 @@ class WikiPage:
     links: set[str]
 
 
+@dataclass(frozen=True)
+class RelinkSuggestion:
+    source_path: str
+    target_title: str
+
+    def render(self) -> str:
+        return f"{self.source_path} -> [[{self.target_title}]]"
+
+
 def relink_dry_run(vault_path: str | Path, *, today: date | None = None) -> RelinkReport:
     vault = Path(vault_path)
     report_date = today or date.today()
+    suggestions = [suggestion.render() for suggestion in _find_suggestions(vault)]
+
+    relative_report = f"output/relink-{report_date.isoformat()}.md"
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_render_report(report_date, suggestions), encoding="utf-8")
+    return RelinkReport(path=relative_report, suggestions=suggestions)
+
+
+def relink_apply(vault_path: str | Path, *, today: date | None = None) -> RelinkReport:
+    vault = Path(vault_path)
+    report_date = today or date.today()
+    applied: list[str] = []
+
+    for suggestion in _find_suggestions(vault):
+        if not suggestion.source_path.startswith("knowledge/"):
+            continue
+        source_path = vault / suggestion.source_path
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+        metadata, body = parse_frontmatter(text)
+        updated_body = _replace_first_title(body, suggestion.target_title)
+        if updated_body == body:
+            continue
+        source_path.write_text(render_frontmatter(metadata, updated_body), encoding="utf-8")
+        applied.append(suggestion.render())
+
+    relative_report = f"output/relink-apply-{report_date.isoformat()}.md"
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_render_apply_report(report_date, applied), encoding="utf-8")
+    return RelinkReport(path=relative_report, suggestions=applied)
+
+
+def _find_suggestions(vault: Path) -> list[RelinkSuggestion]:
     pages = _collect_pages(vault)
     title_counts = Counter(page.title.casefold() for page in pages)
-    suggestions: list[str] = []
+    suggestions: list[RelinkSuggestion] = []
     seen_suggestions: set[str] = set()
 
     for page in pages:
@@ -42,16 +85,15 @@ def relink_dry_run(vault_path: str | Path, *, today: date | None = None) -> Reli
             if _already_links(page, target):
                 continue
             if _mentions_title(page.body, target.title):
-                suggestion = f"{page.relative_path} -> [[{target.title}]]"
-                if suggestion not in seen_suggestions:
+                suggestion = RelinkSuggestion(
+                    source_path=page.relative_path,
+                    target_title=target.title,
+                )
+                rendered = suggestion.render()
+                if rendered not in seen_suggestions:
                     suggestions.append(suggestion)
-                    seen_suggestions.add(suggestion)
-
-    relative_report = f"output/relink-{report_date.isoformat()}.md"
-    report_path = vault / relative_report
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(_render_report(report_date, suggestions), encoding="utf-8")
-    return RelinkReport(path=relative_report, suggestions=suggestions)
+                    seen_suggestions.add(rendered)
+    return suggestions
 
 
 def _collect_pages(vault: Path) -> list[WikiPage]:
@@ -105,11 +147,26 @@ def _mentions_title(body: str, title: str) -> bool:
     return re.search(pattern, body, flags=re.IGNORECASE) is not None
 
 
+def _replace_first_title(body: str, title: str) -> str:
+    pattern = rf"(?<!\[\[)\b{re.escape(title)}\b(?!\]\])"
+    return re.sub(pattern, f"[[{title}]]", body, count=1, flags=re.IGNORECASE)
+
+
 def _render_report(report_date: date, suggestions: list[str]) -> str:
     lines = [f"# Relink dry-run {report_date.isoformat()}", ""]
     if suggestions:
         lines.extend(f"- {suggestion}" for suggestion in suggestions)
     else:
         lines.append("- no missing links found")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_apply_report(report_date: date, applied: list[str]) -> str:
+    lines = [f"# Relink apply {report_date.isoformat()}", ""]
+    if applied:
+        lines.extend(f"- {suggestion}" for suggestion in applied)
+    else:
+        lines.append("- no links applied")
     lines.append("")
     return "\n".join(lines)

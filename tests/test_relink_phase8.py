@@ -4,7 +4,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from segretario.cli import app
-from segretario.vault.relink import relink_dry_run
+from segretario.vault.relink import relink_apply, relink_dry_run
 
 
 def test_relink_dry_run_suggests_missing_links_without_modifying_pages(tmp_path: Path):
@@ -76,6 +76,47 @@ def test_relink_cli_writes_report_through_core(tmp_path: Path, monkeypatch):
     assert result.exit_code == 0
     assert "Relink report: output/relink-" in result.output
     assert "knowledge/alpha.md -> [[Beta]]" in result.output
+    assert (tmp_path / "state" / "taskboard.sqlite").exists()
+    assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
+
+
+def test_relink_apply_updates_only_unambiguous_knowledge_links(tmp_path: Path):
+    vault = tmp_path / "vault"
+    alpha = vault / "knowledge" / "alpha.md"
+    beta = vault / "knowledge" / "beta.md"
+    output = vault / "output" / "daily-digest.md"
+    output.parent.mkdir(parents=True)
+    alpha.parent.mkdir(parents=True)
+    alpha.write_text("# Alpha\n\nBeta is related.\n", encoding="utf-8")
+    beta.write_text("# Beta\n\nAlpha is related.\n", encoding="utf-8")
+    output.write_text("# Daily Digest\n\nAlpha appears here.\n", encoding="utf-8")
+
+    report = relink_apply(vault, today=date(2026, 5, 12))
+
+    assert report.path == "output/relink-apply-2026-05-12.md"
+    assert "knowledge/alpha.md -> [[Beta]]" in report.suggestions
+    assert "knowledge/beta.md -> [[Alpha]]" in report.suggestions
+    assert "Beta is related" not in alpha.read_text(encoding="utf-8")
+    assert "[[Beta]] is related" in alpha.read_text(encoding="utf-8")
+    assert "[[Alpha]] appears here" not in output.read_text(encoding="utf-8")
+
+
+def test_relink_apply_cli_routes_through_core_and_writes_pages(
+    tmp_path: Path,
+    monkeypatch,
+):
+    vault = tmp_path / "vault"
+    (vault / "knowledge").mkdir(parents=True)
+    (vault / "knowledge" / "alpha.md").write_text("# Alpha\n\nBeta.\n", encoding="utf-8")
+    (vault / "knowledge" / "beta.md").write_text("# Beta\n\nAlpha.\n", encoding="utf-8")
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    result = CliRunner().invoke(app, ["relink", "--apply"])
+
+    assert result.exit_code == 0
+    assert "Relink apply report: output/relink-apply-" in result.output
+    assert "[[Beta]]" in (vault / "knowledge" / "alpha.md").read_text(encoding="utf-8")
     assert (tmp_path / "state" / "taskboard.sqlite").exists()
     assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
 

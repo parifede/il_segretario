@@ -6,7 +6,7 @@ from typing import Any
 
 from segretario.agents.base import BaseAgent
 from segretario.vault.health import lint_vault, vault_stats
-from segretario.vault.relink import relink_dry_run
+from segretario.vault.relink import relink_apply, relink_dry_run
 
 
 class MaintenanceAgent(BaseAgent):
@@ -29,6 +29,17 @@ class MaintenanceAgent(BaseAgent):
             if today is not None and not isinstance(today, date):
                 raise ValueError("today must be a date")
             report = relink_dry_run(self.require_vault_path(payload), today=today)
+            return {
+                "path": report.path,
+                "report_path": report.path,
+                "suggestions": report.suggestions,
+            }
+
+        if action == "relink.apply":
+            today = payload.get("today")
+            if today is not None and not isinstance(today, date):
+                raise ValueError("today must be a date")
+            report = relink_apply(self.require_vault_path(payload), today=today)
             return {
                 "path": report.path,
                 "report_path": report.path,

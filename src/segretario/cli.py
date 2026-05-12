@@ -336,6 +336,11 @@ def relink(
         "--dry-run",
         help="Preview missing wikilinks and write a report without editing pages.",
     ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Apply unambiguous wikilinks to knowledge pages.",
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -343,24 +348,27 @@ def relink(
         help="Path to segretario.yaml.",
     ),
 ) -> None:
-    """Preview missing Obsidian wikilinks."""
-    if not dry_run:
-        typer.echo("relink currently supports --dry-run only")
+    """Preview or apply missing Obsidian wikilinks."""
+    if dry_run == apply:
+        typer.echo("choose exactly one: --dry-run or --apply")
         raise typer.Exit(1)
     settings = load_settings(config_path=config)
+    command = "relink.dry_run" if dry_run else "relink.apply"
+    action = "output.write" if dry_run else "knowledge.write"
     result = _build_core(settings).handle(
         TaskRequest(
-            command="relink.dry_run",
-            payload={"vault_path": settings.vault.path, "action": "relink.dry_run"},
+            command=command,
+            payload={"vault_path": settings.vault.path, "action": command},
             risk="low",
-            action="output.write",
+            action=action,
         )
     )
     if not result.ok:
         typer.echo(result.message)
         raise typer.Exit(1)
     report = result.output
-    typer.echo(f"Relink report: {report['report_path']}")
+    label = "Relink report" if dry_run else "Relink apply report"
+    typer.echo(f"{label}: {report['report_path']}")
     if report["suggestions"]:
         for suggestion in report["suggestions"]:
             typer.echo(f"- {suggestion}")
@@ -864,6 +872,7 @@ def _build_core(settings) -> SegretarioCore:
                 "stats": MaintenanceAgent(),
                 "lint.wiki": MaintenanceAgent(),
                 "relink.dry_run": MaintenanceAgent(),
+                "relink.apply": MaintenanceAgent(),
                 "ingest": IngestAgent(),
                 "link": ResearchAgent(),
                 "web": ResearchAgent(),
