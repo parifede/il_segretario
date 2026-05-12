@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from segretario.vault.index_log import append_log
+from segretario.agents.base import BaseAgent
 
 
 class ConfirmationNeededError(Exception):
@@ -19,6 +20,17 @@ class IngestResult:
     path: str
     title: str
     updated: bool
+
+
+class IngestAgent(BaseAgent):
+    def run(self, request: object) -> dict[str, object]:
+        payload = self.payload(request)
+        result = ingest_article(
+            self.require_vault_path(payload),
+            payload.get("source_path", payload.get("source")),
+            auto=bool(payload.get("auto", False)),
+        )
+        return {"path": result.path, "title": result.title, "updated": result.updated}
 
 
 def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: bool = False) -> IngestResult:

@@ -5,12 +5,18 @@ from pathlib import Path
 import typer
 import yaml
 
-from segretario.agents.ingest_agent import ConfirmationNeededError, ingest_article
+from segretario.agents.ingest_agent import ConfirmationNeededError
+from segretario.agents.ingest_agent import IngestAgent
+from segretario.agents.maintenance_agent import MaintenanceAgent
+from segretario.agents.search_agent import SearchAgent
+from segretario.app.core import SegretarioCore
 from segretario.app.query import query_vault
+from segretario.app.models import TaskRequest
+from segretario.app.router import TaskRouter
+from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
-from segretario.tools.search_tool import search_vault
+from segretario.taskboard import TaskboardStore
 from segretario.tools.ollama_tool import build_local_llm
-from segretario.vault.health import lint_vault, vault_stats
 
 app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(help="Configuration commands.")
@@ -108,12 +114,23 @@ def search(
 ) -> None:
     """Search allowed local vault markdown/text files."""
     settings = load_settings(config_path=config)
-    results = search_vault(settings.vault.path, query)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="search",
+            payload={"vault_path": settings.vault.path, "query": query},
+            risk="low",
+            action="vault.search",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    results = result.output
     if not results:
         typer.echo("No matches found.")
         return
     for result in results:
-        typer.echo(f"{result.path}:{result.line}: {result.snippet}")
+        typer.echo(f"{result['path']}:{result['line']}: {result['snippet']}")
 
 
 @app.command()
@@ -148,11 +165,22 @@ def stats(
 ) -> None:
     """Print basic vault statistics."""
     settings = load_settings(config_path=config)
-    summary = vault_stats(settings.vault.path)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="stats",
+            payload={"vault_path": settings.vault.path, "action": "stats"},
+            risk="low",
+            action="vault.search",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    summary = result.output
     typer.echo("Vault stats")
-    for area, count in summary.markdown_by_area.items():
+    for area, count in summary["markdown_by_area"].items():
         typer.echo(f"{area}: {count}")
-    typer.echo(f"total_markdown: {summary.total_markdown}")
+    typer.echo(f"total_markdown: {summary['total_markdown']}")
 
 
 @lint_app.command("wiki")
@@ -166,10 +194,21 @@ def lint_wiki(
 ) -> None:
     """Run basic wiki lint checks and save a report."""
     settings = load_settings(config_path=config)
-    report = lint_vault(settings.vault.path)
-    typer.echo(f"Lint report: {report.path}")
-    if report.issues:
-        for issue in report.issues:
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="lint.wiki",
+            payload={"vault_path": settings.vault.path, "action": "lint.wiki"},
+            risk="low",
+            action="output.write",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    report = result.output
+    typer.echo(f"Lint report: {report['report_path']}")
+    if report["issues"]:
+        for issue in report["issues"]:
             typer.echo(f"- {issue}")
     else:
         typer.echo("- ok")
@@ -189,13 +228,48 @@ def ingest(
     """Ingest a markdown/text source from raw/articles into knowledge."""
     settings = load_settings(config_path=config)
     try:
-        result = ingest_article(settings.vault.path, source, auto=auto)
+        result = _build_core(settings).handle(
+            TaskRequest(
+                command="ingest",
+                payload={
+                    "vault_path": settings.vault.path,
+                    "source_path": source,
+                    "auto": auto,
+                },
+                risk="low",
+                action="knowledge.write",
+            )
+        )
     except (ConfirmationNeededError, FileNotFoundError, ValueError) as exc:
         typer.echo(str(exc))
         raise typer.Exit(1) from exc
 
-    action = "updated" if result.updated else "created"
-    typer.echo(f"{action}: {result.path}")
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    output = result.output
+    action = "updated" if output["updated"] else "created"
+    typer.echo(f"{action}: {output['path']}")
+
+
+def _build_core(settings) -> SegretarioCore:
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    return SegretarioCore(
+        taskboard=taskboard,
+        audit=AuditLog(
+            events_path=settings.audit.events_path,
+            chain_path=settings.audit.hash_chain_path,
+        ),
+        router=TaskRouter(
+            {
+                "search": SearchAgent(),
+                "stats": MaintenanceAgent(),
+                "lint.wiki": MaintenanceAgent(),
+                "ingest": IngestAgent(),
+            }
+        ),
+    )
 
 
 def _path_status(path: Path, *, require_dir: bool = False) -> str:
