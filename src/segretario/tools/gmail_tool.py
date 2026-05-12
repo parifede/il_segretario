@@ -3,14 +3,32 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
 
+class GmailClientProtocol(Protocol):
+    def search_messages(self, *, query: str) -> list[dict[str, str]]:
+        """Search Gmail messages through a configured client."""
+
+    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, str]:
+        """Create a Gmail draft through a configured client."""
+
+
 class GmailTool:
-    def __init__(self, *, state_dir: str | Path) -> None:
+    def __init__(
+        self,
+        *,
+        state_dir: str | Path,
+        google_client: GmailClientProtocol | None = None,
+    ) -> None:
         self.state_dir = Path(state_dir)
+        self.google_client = google_client
 
     def read(self, *, query: str) -> list[dict[str, str]]:
+        if self.google_client is not None:
+            return self.google_client.search_messages(query=query)
+
         messages = _read_json_list(self.state_dir / "gmail_messages.json")
         if not query:
             return messages
@@ -32,6 +50,9 @@ class GmailTool:
         ]
 
     def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, str]:
+        if self.google_client is not None:
+            return self.google_client.create_draft(to=to, subject=subject, body=body)
+
         draft = {
             "id": f"draft_{uuid4().hex[:12]}",
             "to": to,

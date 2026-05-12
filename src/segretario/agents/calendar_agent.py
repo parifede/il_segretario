@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from segretario.agents.base import BaseAgent
+from segretario.connectors.calendar_client import CalendarClient
 from segretario.tools.calendar_tool import CalendarTool
 
 
@@ -8,7 +9,10 @@ class CalendarAgent(BaseAgent):
     def run(self, request: object) -> object:
         payload = self.payload(request)
         action = self.command(request, payload)
-        tool = CalendarTool(state_dir=payload["state_dir"])
+        tool = CalendarTool(
+            state_dir=payload["state_dir"],
+            calendar_client=_calendar_client_from_payload(payload),
+        )
 
         if action == "calendar.list":
             return tool.list_events()
@@ -21,3 +25,12 @@ class CalendarAgent(BaseAgent):
             )
 
         raise ValueError(f"unsupported calendar action: {action}")
+
+
+def _calendar_client_from_payload(payload):
+    if not payload.get("use_google"):
+        return None
+    return CalendarClient.from_token(
+        credentials_path=payload["credentials_path"],
+        token_path=payload["token_path"],
+    )

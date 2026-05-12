@@ -13,6 +13,37 @@ from segretario.tools.calendar_tool import CalendarTool
 from segretario.tools.gmail_tool import GmailTool
 
 
+class FakeGmailClient:
+    def __init__(self) -> None:
+        self.created_drafts = []
+
+    def search_messages(self, *, query: str) -> list[dict[str, str]]:
+        return [
+            {
+                "id": "real_msg_1",
+                "from": "sender@example.com",
+                "subject": f"query={query}",
+                "snippet": "real snippet",
+            }
+        ]
+
+    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, str]:
+        draft = {"id": "real_draft_1", "to": to, "subject": subject, "body": body}
+        self.created_drafts.append(draft)
+        return draft
+
+
+class FakeCalendarClient:
+    def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "real_event_1",
+                "summary": "Real Calendar Event",
+                "when": "2026-05-19T07:00:00Z",
+            }
+        ]
+
+
 def test_google_oauth_status_reports_config_without_reading_secret_contents(tmp_path: Path):
     credentials = tmp_path / "credentials.json"
     token = tmp_path / "token.json"
@@ -64,6 +95,19 @@ def test_gmail_tool_reads_messages_and_creates_local_drafts(tmp_path: Path):
     )
 
 
+def test_gmail_tool_uses_google_client_when_available(tmp_path: Path):
+    client = FakeGmailClient()
+    tool = GmailTool(state_dir=tmp_path / "state" / "google", google_client=client)
+
+    messages = tool.read(query="from:sender@example.com")
+    draft = tool.create_draft(to="person@example.com", subject="Reply", body="Body")
+
+    assert messages[0]["id"] == "real_msg_1"
+    assert messages[0]["subject"] == "query=from:sender@example.com"
+    assert draft["id"] == "real_draft_1"
+    assert client.created_drafts[0]["to"] == "person@example.com"
+
+
 def test_calendar_tool_lists_and_creates_local_events(tmp_path: Path):
     tool = CalendarTool(state_dir=tmp_path / "state" / "google")
 
@@ -73,6 +117,23 @@ def test_calendar_tool_lists_and_creates_local_events(tmp_path: Path):
     assert created["id"].startswith("event_")
     assert events[0]["summary"] == "Dentist"
     assert events[0]["when"] == "tomorrow 15:00"
+
+
+def test_calendar_tool_uses_google_client_for_list_when_available(tmp_path: Path):
+    tool = CalendarTool(
+        state_dir=tmp_path / "state" / "google",
+        calendar_client=FakeCalendarClient(),
+    )
+
+    events = tool.list_events()
+
+    assert events == [
+        {
+            "id": "real_event_1",
+            "summary": "Real Calendar Event",
+            "when": "2026-05-19T07:00:00Z",
+        }
+    ]
 
 
 def test_calendar_private_create_is_allowed_but_attendees_require_confirmation():

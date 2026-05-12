@@ -381,7 +381,7 @@ def mail_read(
         TaskRequest(
             command="mail.read",
             payload={
-                "state_dir": _google_state_dir(settings),
+                **_google_payload(settings),
                 "query": query,
             },
             risk="low",
@@ -416,7 +416,7 @@ def mail_draft(
         TaskRequest(
             command="mail.draft",
             payload={
-                "state_dir": _google_state_dir(settings),
+                **_google_payload(settings),
                 "to": to,
                 "subject": subject,
                 "body": body,
@@ -517,7 +517,7 @@ def calendar_list(
     result = _build_core(settings).handle(
         TaskRequest(
             command="calendar.list",
-            payload={"state_dir": _google_state_dir(settings)},
+            payload=_google_payload(settings),
             risk="low",
             action=PermissionKernel.CALENDAR_READ,
         )
@@ -555,7 +555,7 @@ def calendar_create(
         TaskRequest(
             command="calendar.create",
             payload={
-                "state_dir": _google_state_dir(settings),
+                **_google_payload(settings),
                 "summary": summary,
                 "when": summary,
                 "attendees": attendees,
@@ -648,6 +648,18 @@ def _build_core(settings) -> SegretarioCore:
 
 def _google_state_dir(settings) -> Path:
     return settings.taskboard.sqlite_path.parent / "google"
+
+
+def _google_payload(settings) -> dict[str, object]:
+    return {
+        "state_dir": _google_state_dir(settings),
+        "credentials_path": settings.google.credentials_path,
+        "token_path": settings.google.token_path,
+        "use_google": (
+            settings.google.credentials_path.exists()
+            and settings.google.token_path.exists()
+        ),
+    }
 
 
 def _path_status(path: Path, *, require_dir: bool = False) -> str:

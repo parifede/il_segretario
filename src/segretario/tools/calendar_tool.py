@@ -3,15 +3,29 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
 
+class CalendarClientProtocol(Protocol):
+    def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
+        """List calendar events through a configured client."""
+
+
 class CalendarTool:
-    def __init__(self, *, state_dir: str | Path) -> None:
+    def __init__(
+        self,
+        *,
+        state_dir: str | Path,
+        calendar_client: CalendarClientProtocol | None = None,
+    ) -> None:
         self.state_dir = Path(state_dir)
         self.events_path = self.state_dir / "calendar_events.json"
+        self.calendar_client = calendar_client
 
     def list_events(self) -> list[dict[str, object]]:
+        if self.calendar_client is not None:
+            return self.calendar_client.list_events()
         return _read_events(self.events_path)
 
     def create_event(
