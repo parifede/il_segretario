@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+*.egg-info/
+
+# local state
+state/
+logs/
+
+# secrets
+secrets/
+.env
+*.token
+credentials.json
+token.json
+
+# optional local dev vault content
+vault_dev/raw/
+vault_dev/self/
+vault_dev/output/
+vault_dev/knowledge/**/*.md
+vault_dev/meta/privacy_map.local.json
+
+# local test scratch
+.tmp/

@@ -1,0 +1,52 @@
+project_name: il_segretario
+
+vault:
+  path: "E:\\il_segretario\\vault_dev"
+  require_agents_md: true
+  require_meta_index: true
+  require_meta_log: true
+  skip_paths:
+    - "raw/elaborati"
+
+llm:
+  provider: ollama
+  model: "local-model-name"
+  base_url: "http://127.0.0.1:11434"
+  temperature: 0.2
+  timeout_seconds: 120
+
+cli:
+  default_output: text
+  require_confirmation_for_high_risk: true
+
+taskboard:
+  sqlite_path: "E:\\il_segretario\\state\\taskboard.sqlite"
+  human_mirror_path: "E:\\il_segretario\\state\\bacheca.md"
+  lease_minutes: 15
+  max_retries: 3
+
+audit:
+  events_path: "E:\\il_segretario\\state\\audit\\events.jsonl"
+  hash_chain_path: "E:\\il_segretario\\state\\audit\\hash_chain.jsonl"
+  redact_sensitive_payloads: true
+
+web:
+  enabled: true
+  save_dir: "raw/articles"
+  user_link_auto_fetch: true
+  autonomous_research_enabled: true
+  require_projection_for_personal_context: true
+
+google:
+  enabled: true
+  credentials_path: "E:\\il_segretario\\secrets\\google\\credentials.json"
+  token_path: "E:\\il_segretario\\secrets\\google\\token.json"
+  gmail_enabled: true
+  calendar_enabled: true
+
+scheduler:
+  enabled: false
+  raw_watcher_enabled: false
+  inbox_watcher_enabled: false
+  daily_digest_enabled: false
+  maintenance_budget_minutes: 10

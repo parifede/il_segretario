@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def _root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+class VaultSettings(BaseModel):
+    path: Path = Field(default_factory=lambda: _root() / "vault_dev")
+    require_agents_md: bool = True
+    require_meta_index: bool = True
+    require_meta_log: bool = True
+    skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
+
+
+class LLMSettings(BaseModel):
+    provider: str = "ollama"
+    model: str = "local-model-name"
+    base_url: str = "http://127.0.0.1:11434"
+    temperature: float = 0.2
+    timeout_seconds: int = 120
+
+
+class CLISettings(BaseModel):
+    default_output: str = "text"
+    require_confirmation_for_high_risk: bool = True
+
+
+class TaskboardSettings(BaseModel):
+    sqlite_path: Path = Field(default_factory=lambda: _root() / "state" / "taskboard.sqlite")
+    human_mirror_path: Path = Field(default_factory=lambda: _root() / "state" / "bacheca.md")
+    lease_minutes: int = 15
+    max_retries: int = 3
+
+
+class AuditSettings(BaseModel):
+    events_path: Path = Field(default_factory=lambda: _root() / "state" / "audit" / "events.jsonl")
+    hash_chain_path: Path = Field(default_factory=lambda: _root() / "state" / "audit" / "hash_chain.jsonl")
+    redact_sensitive_payloads: bool = True
+
+
+class WebSettings(BaseModel):
+    enabled: bool = True
+    save_dir: str = "raw/articles"
+    user_link_auto_fetch: bool = True
+    autonomous_research_enabled: bool = True
+    require_projection_for_personal_context: bool = True
+
+
+class GoogleSettings(BaseModel):
+    enabled: bool = True
+    credentials_path: Path = Field(default_factory=lambda: _root() / "secrets" / "google" / "credentials.json")
+    token_path: Path = Field(default_factory=lambda: _root() / "secrets" / "google" / "token.json")
+    gmail_enabled: bool = True
+    calendar_enabled: bool = True
+
+
+class SchedulerSettings(BaseModel):
+    enabled: bool = False
+    raw_watcher_enabled: bool = False
+    inbox_watcher_enabled: bool = False
+    daily_digest_enabled: bool = False
+    maintenance_budget_minutes: int = 10
+
+
+class Settings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    project_name: str = "il_segretario"
+    vault: VaultSettings = Field(default_factory=VaultSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
+    cli: CLISettings = Field(default_factory=CLISettings)
+    taskboard: TaskboardSettings = Field(default_factory=TaskboardSettings)
+    audit: AuditSettings = Field(default_factory=AuditSettings)
+    web: WebSettings = Field(default_factory=WebSettings)
+    google: GoogleSettings = Field(default_factory=GoogleSettings)
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    loaded_config_path: Path | None = None
+
+    def to_safe_dict(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
