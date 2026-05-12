@@ -75,7 +75,7 @@ def test_core_confirmation_required_task_does_not_dispatch(tmp_path: Path):
     )
 
     assert result.ok is False
-    assert "requires confirmation" in result.message
+    assert result.message == "file.delete requires confirmation"
     assert agent.requests == []
     task = taskboard.get_task(result.task_id)
     assert task["status"] == TaskStatus.WAITING_CONFIRMATION.value
@@ -137,3 +137,25 @@ def test_core_projection_required_task_waits_for_confirmation_not_queue(tmp_path
     assert task["status"] == TaskStatus.WAITING_CONFIRMATION.value
     assert task["requires_confirmation"] is True
     assert taskboard.acquire_lease(owner="worker", lease_seconds=30) is None
+
+
+def test_core_projection_message_is_not_confirmation_or_projection(tmp_path: Path):
+    taskboard = TaskboardStore(tmp_path / "taskboard.sqlite")
+    taskboard.initialize()
+    audit = AuditLog(tmp_path / "audit")
+    core = SegretarioCore(
+        taskboard=taskboard,
+        audit=audit,
+        router=TaskRouter({"web": RecordingAgent()}),
+    )
+
+    result = core.handle(
+        TaskRequest(
+            command="web",
+            payload={"query": "private"},
+            risk="medium",
+            action="web.private_context_query",
+        )
+    )
+
+    assert result.message == "web.private_context_query requires privacy projection"

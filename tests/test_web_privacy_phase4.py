@@ -64,7 +64,7 @@ def test_web_cli_private_context_without_projection_waits_confirmation(tmp_path:
     )
 
     assert result.exit_code == 1
-    assert "requires confirmation or projection" in result.output
+    assert "requires privacy projection" in result.output
     assert (tmp_path / "state" / "taskboard.sqlite").exists()
     assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
 

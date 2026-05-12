@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -84,3 +85,17 @@ def test_redacts_common_secret_key_variants(tmp_path):
     assert "client-secret" not in raw
     assert "Bearer abc" not in raw
     assert "api-key" not in raw
+
+
+def test_concurrent_appends_keep_hash_chain_valid(tmp_path):
+    audit_dir = tmp_path / "audit"
+
+    def append(index: int) -> None:
+        AuditLog(audit_dir).append_event("task.concurrent", {"task_id": index})
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(append, range(32)))
+
+    events = read_jsonl(audit_dir / "events.jsonl")
+    assert [event["sequence"] for event in events] == list(range(1, 33))
+    assert AuditLog(audit_dir).verify() is True

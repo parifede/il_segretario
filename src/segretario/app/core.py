@@ -68,7 +68,7 @@ class SegretarioCore:
             return CoreResult(
                 ok=False,
                 task_id=task_id,
-                message=f"{action} requires confirmation or projection",
+                message=_decision_message(decision, action),
             )
 
         try:
@@ -100,6 +100,14 @@ def _confirmation_reason(decision: PermissionDecision, action: str) -> str | Non
     if decision == PermissionDecision.PROJECT:
         return f"{action} requires privacy projection"
     return None
+
+
+def _decision_message(decision: PermissionDecision, action: str) -> str:
+    if decision == PermissionDecision.CONFIRM:
+        return f"{action} requires confirmation"
+    if decision == PermissionDecision.PROJECT:
+        return f"{action} requires privacy projection"
+    return f"{action} requires permission handling"
 
 
 def _hash_payload(payload: dict[str, Any]) -> str:

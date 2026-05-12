@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,26 +45,27 @@ class AuditLog:
     def append_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.events_path.parent.mkdir(parents=True, exist_ok=True)
         self.chain_path.parent.mkdir(parents=True, exist_ok=True)
-        sequence = self._next_sequence()
-        previous_hash = self._last_entry_hash()
-        event = {
-            "sequence": sequence,
-            "event_type": event_type,
-            "payload": _redact(payload),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        event_hash = _digest(event)
-        chain_entry = {
-            "sequence": sequence,
-            "event_hash": event_hash,
-            "previous_hash": previous_hash,
-        }
-        chain_entry["entry_hash"] = _digest(chain_entry)
+        with _audit_lock(self.chain_path):
+            sequence = self._next_sequence()
+            previous_hash = self._last_entry_hash()
+            event = {
+                "sequence": sequence,
+                "event_type": event_type,
+                "payload": _redact(payload),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            event_hash = _digest(event)
+            chain_entry = {
+                "sequence": sequence,
+                "event_hash": event_hash,
+                "previous_hash": previous_hash,
+            }
+            chain_entry["entry_hash"] = _digest(chain_entry)
 
-        with self.events_path.open("a", encoding="utf-8") as events_file:
-            events_file.write(_canonical_json(event) + "\n")
-        with self.chain_path.open("a", encoding="utf-8") as chain_file:
-            chain_file.write(_canonical_json(chain_entry) + "\n")
+            with self.events_path.open("a", encoding="utf-8") as events_file:
+                events_file.write(_canonical_json(event) + "\n")
+            with self.chain_path.open("a", encoding="utf-8") as chain_file:
+                chain_file.write(_canonical_json(chain_entry) + "\n")
 
         return chain_entry
 
@@ -135,3 +139,25 @@ def _digest(value: dict[str, Any]) -> str:
 
 def _canonical_json(value: dict[str, Any]) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+@contextmanager
+def _audit_lock(chain_path: Path):
+    lock_path = chain_path.with_suffix(chain_path.suffix + ".lock")
+    deadline = time.monotonic() + 10
+    descriptor: int | None = None
+    while descriptor is None:
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        except (FileExistsError, PermissionError):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out waiting for audit lock: {lock_path}")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        os.close(descriptor)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
