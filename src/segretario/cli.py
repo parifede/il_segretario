@@ -927,6 +927,7 @@ def calendar_create(
 @calendar_app.command("modify")
 def calendar_modify(
     event_ref: str,
+    summary: str = typer.Option(..., "--summary", help="Updated event summary."),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -939,7 +940,11 @@ def calendar_modify(
     result = _build_core(settings).handle(
         TaskRequest(
             command="calendar.modify",
-            payload={"event_ref": event_ref},
+            payload={
+                **_google_payload(settings),
+                "event_ref": event_ref,
+                "summary": summary,
+            },
             risk="high",
             action=PermissionKernel.CALENDAR_MODIFY,
         )
@@ -1086,6 +1091,7 @@ def _build_core(settings) -> SegretarioCore:
                 "mail.delete": MailAgent(),
                 "calendar.list": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
+                "calendar.modify": CalendarAgent(),
                 "calendar.delete": CalendarAgent(),
                 "external.answer": SecurityAgent(),
             }

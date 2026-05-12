@@ -48,6 +48,18 @@ class CalendarClient:
             "deleted": True,
         }
 
+    def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
+        event = (
+            self.service.events()
+            .patch(
+                calendarId="primary",
+                eventId=event_ref,
+                body={"summary": summary},
+            )
+            .execute()
+        )
+        return _event_summary(event)
+
 
 def _event_summary(event: dict[str, object]) -> dict[str, object]:
     start = event.get("start", {})

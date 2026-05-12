@@ -24,6 +24,12 @@ class CalendarAgent(BaseAgent):
                 attendees=list(payload.get("attendees", [])),
             )
 
+        if action == "calendar.modify":
+            return tool.update_event(
+                event_ref=str(payload["event_ref"]),
+                summary=str(payload["summary"]),
+            )
+
         if action == "calendar.delete":
             return tool.delete_event(event_ref=str(payload["event_ref"]))
 

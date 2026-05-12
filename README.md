@@ -71,6 +71,7 @@ High-risk Gmail and Calendar operations use a confirmation runner:
 
 ```powershell
 uv run segretario mail archive <MESSAGE_ID>
+uv run segretario calendar modify <EVENT_ID> --summary "Updated title"
 uv run segretario tasks --limit 5
 uv run segretario task run <TASK_ID>
 uv run segretario approve <TASK_ID>

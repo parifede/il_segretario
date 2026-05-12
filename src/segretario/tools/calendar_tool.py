@@ -11,6 +11,9 @@ class CalendarClientProtocol(Protocol):
     def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
         """List calendar events through a configured client."""
 
+    def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
+        """Update a calendar event through a configured client."""
+
     def delete_event(self, *, event_ref: str) -> dict[str, object]:
         """Delete a calendar event through a configured client."""
 
@@ -50,6 +53,23 @@ class CalendarTool:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.events_path.write_text(json.dumps(events, indent=2, sort_keys=True), encoding="utf-8")
         return event
+
+    def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
+        if self.calendar_client is not None:
+            return self.calendar_client.update_event(event_ref=event_ref, summary=summary)
+
+        events = _read_events(self.events_path)
+        for event in events:
+            if str(event.get("id", "")) == event_ref:
+                event["summary"] = summary
+                event["updated_at"] = datetime.now(UTC).isoformat()
+                self.state_dir.mkdir(parents=True, exist_ok=True)
+                self.events_path.write_text(
+                    json.dumps(events, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                return event
+        raise ValueError(f"unknown calendar event: {event_ref}")
 
     def delete_event(self, *, event_ref: str) -> dict[str, object]:
         if self.calendar_client is not None:

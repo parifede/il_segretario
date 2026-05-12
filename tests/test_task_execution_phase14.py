@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sqlite3
 
 from typer.testing import CliRunner
@@ -176,6 +177,43 @@ def test_approved_calendar_delete_task_can_be_run_from_stored_payload(
         encoding="utf-8"
     )
     assert event_id not in events
+    assert _audit(tmp_path).verify() is True
+
+
+def test_approved_calendar_modify_task_can_be_run_from_stored_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    create = runner.invoke(app, ["calendar", "create", "Original local event"])
+    event_id = create.output.strip().split("event: ", 1)[1]
+    modify = runner.invoke(
+        app,
+        ["calendar", "modify", event_id, "--summary", "Updated local event"],
+    )
+    task_id = _latest_task_id(tmp_path)
+
+    blocked = runner.invoke(app, ["task", "run", str(task_id)])
+    approve = runner.invoke(app, ["approve", str(task_id)])
+    run = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert modify.exit_code == 1
+    assert "calendar.modify requires confirmation" in modify.output
+    assert blocked.exit_code == 1
+    assert f"task {task_id} is not queued" in blocked.output
+    assert approve.exit_code == 0
+    assert run.exit_code == 0
+    assert f"task {task_id}: completed" in run.output
+    assert _task_output_ref(tmp_path, task_id) == event_id
+    events = json.loads(
+        (tmp_path / "state" / "google" / "calendar_events.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    updated_event = next(event for event in events if event["id"] == event_id)
+    assert updated_event["summary"] == "Updated local event"
     assert _audit(tmp_path).verify() is True
 
 

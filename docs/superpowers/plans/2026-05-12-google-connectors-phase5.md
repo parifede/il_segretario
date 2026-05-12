@@ -8,11 +8,11 @@
 
 - `src/segretario/connectors/google_oauth.py`: credentials/token status and authorized credentials loading, no secret contents printed.
 - `src/segretario/connectors/gmail_client.py`: Gmail API read and draft client.
-- `src/segretario/connectors/calendar_client.py`: Calendar API read client.
+- `src/segretario/connectors/calendar_client.py`: Calendar API read and summary patch client.
 - `src/segretario/tools/gmail_tool.py`: Gmail message read and draft creation with real-client or local fallback.
-- `src/segretario/tools/calendar_tool.py`: Calendar event list with real-client or local fallback, and local private create.
+- `src/segretario/tools/calendar_tool.py`: Calendar event list/create/modify/delete with real-client or local fallback.
 - `src/segretario/agents/mail_agent.py`: fixed agent wrapper for `mail.read` and `mail.draft`.
-- `src/segretario/agents/calendar_agent.py`: fixed agent wrapper for `calendar.list` and `calendar.create`.
+- `src/segretario/agents/calendar_agent.py`: fixed agent wrapper for `calendar.list`, `calendar.create`, `calendar.modify`, and `calendar.delete`.
 - `src/segretario/cli.py`: `mail` and `calendar` command groups routed through `SegretarioCore`.
 - `tests/test_google_phase5.py`: connector/tool/CLI confirmation tests.
 

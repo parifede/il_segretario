@@ -37,6 +37,9 @@ class FakeGmailClient:
 
 
 class FakeCalendarClient:
+    def __init__(self) -> None:
+        self.updated_events = []
+
     def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
         return [
             {
@@ -45,6 +48,11 @@ class FakeCalendarClient:
                 "when": "2026-05-19T07:00:00Z",
             }
         ]
+
+    def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
+        event = {"id": event_ref, "summary": summary, "when": "2026-05-19T07:00:00Z"}
+        self.updated_events.append(event)
+        return event
 
 
 def test_google_oauth_status_reports_config_without_reading_secret_contents(tmp_path: Path):
@@ -198,20 +206,24 @@ def test_calendar_tool_lists_and_creates_local_events(tmp_path: Path):
     tool = CalendarTool(state_dir=tmp_path / "state" / "google")
 
     created = tool.create_event(summary="Dentist", when="tomorrow 15:00")
+    updated = tool.update_event(event_ref=str(created["id"]), summary="Updated dentist")
     events = tool.list_events()
 
     assert created["id"].startswith("event_")
-    assert events[0]["summary"] == "Dentist"
+    assert updated["id"] == created["id"]
+    assert events[0]["summary"] == "Updated dentist"
     assert events[0]["when"] == "tomorrow 15:00"
 
 
 def test_calendar_tool_uses_google_client_for_list_when_available(tmp_path: Path):
+    client = FakeCalendarClient()
     tool = CalendarTool(
         state_dir=tmp_path / "state" / "google",
-        calendar_client=FakeCalendarClient(),
+        calendar_client=client,
     )
 
     events = tool.list_events()
+    updated = tool.update_event(event_ref="real_event_1", summary="Updated Real Event")
 
     assert events == [
         {
@@ -220,6 +232,8 @@ def test_calendar_tool_uses_google_client_for_list_when_available(tmp_path: Path
             "when": "2026-05-19T07:00:00Z",
         }
     ]
+    assert updated["summary"] == "Updated Real Event"
+    assert client.updated_events[0]["id"] == "real_event_1"
 
 
 def test_calendar_private_create_is_allowed_but_attendees_require_confirmation():
@@ -262,6 +276,10 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
         app,
         ["calendar", "create", "Meeting tomorrow", "--attendee", "person@example.com"],
     )
+    modify = CliRunner().invoke(
+        app,
+        ["calendar", "modify", "event_123", "--summary", "Updated dentist"],
+    )
     delete = CliRunner().invoke(app, ["calendar", "delete", "event_123"])
 
     assert read.exit_code == 0
@@ -276,6 +294,8 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert "event:" in create.output
     assert create_with_attendee.exit_code == 1
     assert "calendar.create_with_attendees requires confirmation" in create_with_attendee.output
+    assert modify.exit_code == 1
+    assert "calendar.modify requires confirmation" in modify.output
     assert delete.exit_code == 1
     assert "calendar.delete requires confirmation" in delete.output
 
@@ -290,6 +310,7 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert ("calendar.list", "completed", "low") in rows
     assert ("calendar.create", "completed", "low") in rows
     assert ("calendar.create", "waiting_confirmation", "high") in rows
+    assert ("calendar.modify", "waiting_confirmation", "high") in rows
     assert ("calendar.delete", "waiting_confirmation", "high") in rows
     assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
 
