@@ -41,6 +41,7 @@ def test_approved_mail_send_task_can_be_run_from_stored_payload(
     assert f"task {task_id}: completed" in run.output
     assert _task_status(tmp_path, task_id) == "completed"
     assert _task_lease_owner(tmp_path, task_id) is None
+    assert _task_output_ref(tmp_path, task_id).startswith("sent_")
     assert draft_id in (tmp_path / "state" / "google" / "gmail_sent.jsonl").read_text(
         encoding="utf-8"
     )
@@ -82,6 +83,7 @@ def test_approved_mail_archive_task_can_be_run_from_stored_payload(
     assert approve.exit_code == 0
     assert run.exit_code == 0
     assert f"task {task_id}: completed" in run.output
+    assert _task_output_ref(tmp_path, task_id).startswith("archived_")
     assert "msg_archive_1" in (
         tmp_path / "state" / "google" / "gmail_archived.jsonl"
     ).read_text(encoding="utf-8")
@@ -106,6 +108,7 @@ def test_approved_mail_delete_task_can_be_run_from_stored_payload(
     assert approve.exit_code == 0
     assert run.exit_code == 0
     assert f"task {task_id}: completed" in run.output
+    assert _task_output_ref(tmp_path, task_id).startswith("deleted_")
     assert "msg_delete_1" in (tmp_path / "state" / "google" / "gmail_deleted.jsonl").read_text(
         encoding="utf-8"
     )
@@ -136,6 +139,7 @@ def test_approved_calendar_create_with_attendee_can_be_run_from_stored_payload(
     assert approve.exit_code == 0
     assert run.exit_code == 0
     assert f"task {task_id}: completed" in run.output
+    assert _task_output_ref(tmp_path, task_id).startswith("event_")
     events = (tmp_path / "state" / "google" / "calendar_events.json").read_text(
         encoding="utf-8"
     )
@@ -167,6 +171,7 @@ def test_approved_calendar_delete_task_can_be_run_from_stored_payload(
     assert approve.exit_code == 0
     assert run.exit_code == 0
     assert f"task {task_id}: completed" in run.output
+    assert _task_output_ref(tmp_path, task_id) == event_id
     events = (tmp_path / "state" / "google" / "calendar_events.json").read_text(
         encoding="utf-8"
     )
@@ -211,6 +216,14 @@ def _task_lease_owner(tmp_path: Path, task_id: int) -> str | None:
     db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
     return db.execute(
         "select lease_owner from tasks where id = ?",
+        (task_id,),
+    ).fetchone()[0]
+
+
+def _task_output_ref(tmp_path: Path, task_id: int) -> str:
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    return db.execute(
+        "select output_ref from tasks where id = ?",
         (task_id,),
     ).fetchone()[0]
 

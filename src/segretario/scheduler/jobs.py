@@ -226,7 +226,7 @@ def _execute_scheduled_tasks(
             )
             continue
 
-        taskboard.update_task_status(int(task["id"]), TaskStatus.COMPLETED)
+        taskboard.complete_task(int(task["id"]), output_ref=output_ref)
         audit.append_event(
             "scheduler.task_completed",
             {"task_id": task["id"], "command": command, "output": output_ref},

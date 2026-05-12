@@ -202,6 +202,27 @@ class TaskboardStore:
             raise KeyError(f"unknown task id: {task_id}")
         return task
 
+    def complete_task(
+        self,
+        task_id: int,
+        *,
+        output_ref: str | None = None,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?,
+                    output_ref = COALESCE(?, output_ref),
+                    lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (TaskStatus.COMPLETED.value, output_ref, _utc_now(), task_id),
+            )
+        return self._require_task(task_id)
+
     def update_input_ref(self, task_id: int, input_ref: str) -> dict[str, Any]:
         with self._connect() as connection:
             connection.execute(

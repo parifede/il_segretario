@@ -394,10 +394,11 @@ def task_run(
         typer.echo(str(exc))
         raise typer.Exit(1) from exc
 
-    taskboard.update_task_status(task_id, TaskStatus.COMPLETED)
+    output_ref = _cli_output_ref(output)
+    taskboard.complete_task(task_id, output_ref=output_ref)
     audit.append_event(
         "task.completed",
-        {"task_id": task_id, "command": request.command, "output": _cli_output_ref(output)},
+        {"task_id": task_id, "command": request.command, "output": output_ref},
     )
     typer.echo(f"task {task_id}: completed")
 

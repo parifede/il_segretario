@@ -9,7 +9,7 @@ from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.policies.permissions import PermissionDecision, PermissionKernel
 from segretario.taskboard.payloads import TaskPayloadStore
-from segretario.taskboard import TaskStatus, TaskboardStore
+from segretario.taskboard import TaskboardStore
 
 
 class SegretarioCore:
@@ -86,10 +86,11 @@ class SegretarioCore:
             )
             return CoreResult(ok=False, task_id=task_id, message=str(exc))
 
-        self.taskboard.update_task_status(task_id, TaskStatus.COMPLETED)
+        output_ref = _safe_output_ref(output)
+        self.taskboard.complete_task(task_id, output_ref=output_ref)
         self.audit.append_event(
             "task.completed",
-            {"task_id": task_id, "action": action, "output": _safe_output_ref(output)},
+            {"task_id": task_id, "action": action, "output": output_ref},
         )
         return CoreResult(
             ok=True,
