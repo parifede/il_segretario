@@ -5,8 +5,10 @@ from pathlib import Path
 import typer
 import yaml
 
+from segretario.agents.calendar_agent import CalendarAgent
 from segretario.agents.ingest_agent import ConfirmationNeededError
 from segretario.agents.ingest_agent import IngestAgent
+from segretario.agents.mail_agent import MailAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
 from segretario.agents.research_agent import ResearchAgent
 from segretario.agents.search_agent import SearchAgent
@@ -17,6 +19,7 @@ from segretario.app.models import TaskRequest
 from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
+from segretario.policies.permissions import PermissionKernel
 from segretario.taskboard import TaskboardStore
 from segretario.tools.ollama_tool import build_local_llm
 
@@ -24,9 +27,13 @@ app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(help="Configuration commands.")
 vault_app = typer.Typer(help="Vault commands.")
 lint_app = typer.Typer(help="Lint commands.")
+mail_app = typer.Typer(help="Gmail commands.")
+calendar_app = typer.Typer(help="Calendar commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
+app.add_typer(mail_app, name="mail")
+app.add_typer(calendar_app, name="calendar")
 
 
 @app.command()
@@ -358,6 +365,259 @@ def web(
     typer.echo(f"web query: {result.output['query']}")
 
 
+@mail_app.command("read")
+def mail_read(
+    query: str = typer.Option("", "--query", help="Gmail search query."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Read local Gmail message metadata through the safe interface."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="mail.read",
+            payload={
+                "state_dir": _google_state_dir(settings),
+                "query": query,
+            },
+            risk="low",
+            action=PermissionKernel.GMAIL_READ,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    if not result.output:
+        typer.echo("No messages found.")
+        return
+    for message in result.output:
+        typer.echo(f"{message.get('id')}: {message.get('subject')} - {message.get('snippet')}")
+
+
+@mail_app.command("draft")
+def mail_draft(
+    to: str = typer.Option(..., "--to", help="Recipient email address."),
+    subject: str = typer.Option(..., "--subject", help="Draft subject."),
+    body: str = typer.Option(..., "--body", help="Draft body."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a local Gmail draft record."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="mail.draft",
+            payload={
+                "state_dir": _google_state_dir(settings),
+                "to": to,
+                "subject": subject,
+                "body": body,
+            },
+            risk="low",
+            action=PermissionKernel.GMAIL_DRAFT,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    typer.echo(f"draft: {result.output['id']}")
+
+
+@mail_app.command("send")
+def mail_send(
+    draft_id: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for Gmail send."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="mail.send",
+            payload={"draft_id": draft_id},
+            risk="high",
+            action=PermissionKernel.GMAIL_SEND,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@mail_app.command("archive")
+def mail_archive(
+    message_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for Gmail archive."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="mail.archive",
+            payload={"message_ref": message_ref},
+            risk="high",
+            action=PermissionKernel.GMAIL_ARCHIVE,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@mail_app.command("delete")
+def mail_delete(
+    message_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for Gmail delete."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="mail.delete",
+            payload={"message_ref": message_ref},
+            risk="high",
+            action=PermissionKernel.GMAIL_DELETE,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@calendar_app.command("list")
+def calendar_list(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """List local calendar event metadata."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.list",
+            payload={"state_dir": _google_state_dir(settings)},
+            risk="low",
+            action=PermissionKernel.CALENDAR_READ,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    if not result.output:
+        typer.echo("No events found.")
+        return
+    for event in result.output:
+        typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
+
+
+@calendar_app.command("create")
+def calendar_create(
+    summary: str,
+    attendee: list[str] | None = typer.Option(None, "--attendee", help="Event attendee."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a local private calendar event, or confirmation task with attendees."""
+    settings = load_settings(config_path=config)
+    attendees = attendee or []
+    action = (
+        PermissionKernel.CALENDAR_CREATE_WITH_ATTENDEES
+        if attendees
+        else PermissionKernel.CALENDAR_CREATE
+    )
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.create",
+            payload={
+                "state_dir": _google_state_dir(settings),
+                "summary": summary,
+                "when": summary,
+                "attendees": attendees,
+            },
+            risk="high" if attendees else "low",
+            action=action,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    typer.echo(f"event: {result.output['id']}")
+
+
+@calendar_app.command("modify")
+def calendar_modify(
+    event_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for calendar modification."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.modify",
+            payload={"event_ref": event_ref},
+            risk="high",
+            action=PermissionKernel.CALENDAR_MODIFY,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@calendar_app.command("delete")
+def calendar_delete(
+    event_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for calendar deletion."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.delete",
+            payload={"event_ref": event_ref},
+            risk="high",
+            action=PermissionKernel.CALENDAR_DELETE,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
 def _build_core(settings) -> SegretarioCore:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -377,9 +637,17 @@ def _build_core(settings) -> SegretarioCore:
                 "web": ResearchAgent(),
                 "meta.index.ensure": WikiMaintainerAgent(),
                 "meta.log.append": WikiMaintainerAgent(),
+                "mail.read": MailAgent(),
+                "mail.draft": MailAgent(),
+                "calendar.list": CalendarAgent(),
+                "calendar.create": CalendarAgent(),
             }
         ),
     )
+
+
+def _google_state_dir(settings) -> Path:
+    return settings.taskboard.sqlite_path.parent / "google"
 
 
 def _path_status(path: Path, *, require_dir: bool = False) -> str:

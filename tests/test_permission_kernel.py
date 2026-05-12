@@ -12,6 +12,7 @@ def test_low_risk_actions_are_allowed():
         PermissionKernel.GMAIL_READ,
         PermissionKernel.GMAIL_DRAFT,
         PermissionKernel.CALENDAR_READ,
+        PermissionKernel.CALENDAR_CREATE,
         PermissionKernel.WEB_PUBLIC_QUERY,
     ):
         assert PermissionKernel.decision_for(action) == PermissionDecision.ALLOW

@@ -24,6 +24,7 @@ class PermissionKernel:
     GMAIL_DELETE = "gmail.delete"
     GMAIL_ARCHIVE = "gmail.archive"
     CALENDAR_READ = "calendar.read"
+    CALENDAR_CREATE = "calendar.create"
     CALENDAR_CREATE_WITH_ATTENDEES = "calendar.create_with_attendees"
     CALENDAR_MODIFY = "calendar.modify"
     CALENDAR_DELETE = "calendar.delete"
@@ -46,6 +47,7 @@ class PermissionKernel:
             GMAIL_READ,
             GMAIL_DRAFT,
             CALENDAR_READ,
+            CALENDAR_CREATE,
             WEB_PUBLIC_QUERY,
         }
     )

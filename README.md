@@ -29,6 +29,8 @@ uv run segretario search "topic"
 uv run segretario query "question"
 uv run segretario link "https://example.com/article"
 uv run segretario web "public research query"
+uv run segretario mail read --query "subject:example"
+uv run segretario calendar list
 uv run segretario lint wiki
 uv run segretario stats
 ```
@@ -56,5 +58,6 @@ uv run segretario web "private-context query" --private-context --projection "pr
 - Vault-private work uses local tools and local models.
 - `self/` and `meta/privacy_map.local.json` are no-export paths.
 - Gmail send/archive/delete and Calendar modify/delete require taskboard confirmation.
+- Phase 5 Google commands use local safe interfaces unless real OAuth API usage is explicitly requested.
 - Audit events are append-only JSONL records linked by a hash chain.
 - Google credentials, OAuth tokens, local state, and private dev vault content are gitignored.
