@@ -24,6 +24,9 @@ class MailAgent(BaseAgent):
                 body=str(payload["body"]),
             )
 
+        if action == "mail.send":
+            return tool.send_draft(draft_id=str(payload["draft_id"]))
+
         raise ValueError(f"unsupported mail action: {action}")
 
 

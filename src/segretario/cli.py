@@ -23,6 +23,8 @@ from segretario.config.loader import default_config_path, load_settings
 from segretario.policies.permissions import PermissionKernel
 from segretario.scheduler.jobs import run_scheduler_once
 from segretario.taskboard import TaskboardStore
+from segretario.taskboard import TaskStatus
+from segretario.taskboard.payloads import TaskPayloadStore
 from segretario.tools.ollama_tool import build_local_llm
 
 app = typer.Typer(no_args_is_help=True)
@@ -280,6 +282,71 @@ def task_show(
         elif value is None:
             value = ""
         typer.echo(f"{key}: {value}")
+
+
+@task_app.command("run")
+def task_run(
+    task_id: int,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Run one queued task after confirmation has been approved."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    task = taskboard.get_task(task_id)
+    if task is None:
+        typer.echo(f"unknown task id: {task_id}")
+        raise typer.Exit(1)
+    if task["status"] != TaskStatus.QUEUED.value:
+        typer.echo(f"task {task_id} is not queued")
+        raise typer.Exit(1)
+
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    try:
+        request = payload_store.load(str(task.get("input_ref") or ""))
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    try:
+        taskboard.start_queued_task(
+            task_id,
+            owner="cli",
+            lease_seconds=max(settings.taskboard.lease_minutes, 1) * 60,
+        )
+        audit.append_event(
+            "task.started",
+            {"task_id": task_id, "command": request.command, "source": "cli"},
+        )
+        output = _build_core(settings).router.agent_for(request.command).run(request)
+    except Exception as exc:
+        taskboard.record_failure(
+            task_id,
+            error=str(exc),
+            max_retries=settings.taskboard.max_retries,
+        )
+        audit.append_event(
+            "task.failed",
+            {"task_id": task_id, "command": task["command"], "error": str(exc)},
+        )
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+    taskboard.update_task_status(task_id, TaskStatus.COMPLETED)
+    audit.append_event(
+        "task.completed",
+        {"task_id": task_id, "command": request.command, "output": _cli_output_ref(output)},
+    )
+    typer.echo(f"task {task_id}: completed")
 
 
 @app.command()
@@ -679,7 +746,7 @@ def mail_send(
     result = _build_core(settings).handle(
         TaskRequest(
             command="mail.send",
-            payload={"draft_id": draft_id},
+            payload={**_google_payload(settings), "draft_id": draft_id},
             risk="high",
             action=PermissionKernel.GMAIL_SEND,
         )
@@ -960,6 +1027,7 @@ def _build_core(settings) -> SegretarioCore:
                 "meta.log.append": WikiMaintainerAgent(),
                 "mail.read": MailAgent(),
                 "mail.draft": MailAgent(),
+                "mail.send": MailAgent(),
                 "calendar.list": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
                 "external.answer": SecurityAgent(),
@@ -982,6 +1050,15 @@ def _google_payload(settings) -> dict[str, object]:
             and settings.google.token_path.exists()
         ),
     }
+
+
+def _cli_output_ref(output: object) -> str:
+    if isinstance(output, dict):
+        for key in ("path", "report_path", "id"):
+            value = output.get(key)
+            if isinstance(value, str):
+                return value
+    return type(output).__name__
 
 
 def _path_status(path: Path, *, require_dir: bool = False) -> str:

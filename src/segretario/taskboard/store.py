@@ -173,15 +173,42 @@ class TaskboardStore:
 
     def update_task_status(self, task_id: int, status: str | TaskStatus) -> dict[str, Any]:
         status_value = _status_value(status)
+        terminal_statuses = {
+            TaskStatus.COMPLETED.value,
+            TaskStatus.FAILED.value,
+            TaskStatus.DENIED.value,
+            TaskStatus.CANCELLED.value,
+        }
         with self._connect() as connection:
-            connection.execute(
-                "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-                (status_value, _utc_now(), task_id),
-            )
+            if status_value in terminal_statuses:
+                connection.execute(
+                    """
+                    UPDATE tasks
+                    SET status = ?,
+                        lease_owner = NULL,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (status_value, _utc_now(), task_id),
+                )
+            else:
+                connection.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (status_value, _utc_now(), task_id),
+                )
         task = self.get_task(task_id)
         if task is None:
             raise KeyError(f"unknown task id: {task_id}")
         return task
+
+    def update_input_ref(self, task_id: int, input_ref: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE tasks SET input_ref = ?, updated_at = ? WHERE id = ?",
+                (input_ref, _utc_now(), task_id),
+            )
+        return self._require_task(task_id)
 
     def approve_task(self, task_id: int, audit_ref: str | None = None) -> dict[str, Any]:
         task = self._require_task(task_id)
@@ -276,6 +303,42 @@ class TaskboardStore:
             ).fetchone()
 
         return _task_from_row(updated)
+
+    def start_queued_task(
+        self,
+        task_id: int,
+        *,
+        owner: str,
+        lease_seconds: int,
+    ) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        if task["status"] != TaskStatus.QUEUED.value:
+            raise ValueError(f"task {task_id} is not queued")
+        if task["requires_confirmation"]:
+            raise ValueError(f"task {task_id} still requires confirmation")
+        now = _utc_now()
+        expires_at = _utc_now_plus(seconds=lease_seconds)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?,
+                    assigned_agent = ?,
+                    lease_owner = ?,
+                    lease_expires_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    TaskStatus.RUNNING.value,
+                    owner,
+                    owner,
+                    expires_at,
+                    now,
+                    task_id,
+                ),
+            )
+        return self._require_task(task_id)
 
     def force_expire_lease(self, task_id: int) -> dict[str, Any]:
         with self._connect() as connection:

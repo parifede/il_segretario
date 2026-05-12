@@ -62,6 +62,18 @@ class GmailClient:
             "subject": subject,
         }
 
+    def send_draft(self, *, draft_id: str) -> dict[str, str]:
+        sent = (
+            self.service.users()
+            .drafts()
+            .send(userId="me", body={"id": draft_id})
+            .execute()
+        )
+        return {
+            "id": str(sent.get("id", "")),
+            "draft_id": draft_id,
+        }
+
 
 def _message_summary(message: dict[str, object]) -> dict[str, str]:
     headers = {

@@ -8,6 +8,7 @@ from segretario.app.models import CoreResult, TaskRequest
 from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.policies.permissions import PermissionDecision, PermissionKernel
+from segretario.taskboard.payloads import TaskPayloadStore
 from segretario.taskboard import TaskStatus, TaskboardStore
 
 
@@ -61,6 +62,10 @@ class SegretarioCore:
             )
 
         if decision in {PermissionDecision.CONFIRM, PermissionDecision.PROJECT}:
+            payload_ref = TaskPayloadStore(
+                self.taskboard.db_path.parent,
+            ).save(task_id, request)
+            self.taskboard.update_input_ref(task_id, payload_ref)
             self.audit.append_event(
                 "task.waiting_confirmation",
                 {"task_id": task_id, "action": action, "decision": decision.value},
