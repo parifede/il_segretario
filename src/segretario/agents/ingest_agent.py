@@ -46,13 +46,14 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
     if _looks_personal(raw):
         raise ConfirmationNeededError("personal-looking content requires confirmation")
 
-    title = _extract_title(raw, source.stem)
+    source_metadata, source_body = _split_frontmatter(raw)
+    title = str(source_metadata.get("title") or _extract_title(source_body, source.stem))
     slug = _slugify(title)
     target_relative = f"knowledge/{slug}.md"
     target = vault / target_relative
     updated = target.exists()
 
-    body = _body_without_title(raw)
+    body = _body_without_title(source_body)
     body = _convert_markdown_links_to_wikilinks(body)
     frontmatter = {
         "title": title,
@@ -80,6 +81,24 @@ def _normalize_source(source_path: Path | str) -> str:
     if Path(relative).suffix.lower() not in {".md", ".txt"}:
         raise ValueError("ingest source must be markdown or text")
     return relative
+
+
+def _split_frontmatter(text: str) -> tuple[dict[str, object], str]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() != "---":
+            continue
+        metadata_text = "\n".join(lines[1:index])
+        body = "\n".join(lines[index + 1 :])
+        metadata = yaml.safe_load(metadata_text) or {}
+        if not isinstance(metadata, dict):
+            return {}, body
+        return metadata, body
+
+    return {}, text
 
 
 def _looks_personal(text: str) -> bool:

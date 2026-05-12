@@ -27,6 +27,7 @@ uv run segretario config show
 uv run segretario vault check
 uv run segretario search "topic"
 uv run segretario query "question"
+uv run segretario link "https://example.com/article"
 uv run segretario lint wiki
 uv run segretario stats
 ```
@@ -35,6 +36,12 @@ Basic ingest for Phase 1:
 
 ```powershell
 uv run segretario ingest raw/articles/example.md --auto
+```
+
+Fetch and ingest a public link for Phase 4:
+
+```powershell
+uv run segretario link "https://example.com/article" --ingest
 ```
 
 ## Safety Model

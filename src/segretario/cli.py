@@ -8,6 +8,7 @@ import yaml
 from segretario.agents.ingest_agent import ConfirmationNeededError
 from segretario.agents.ingest_agent import IngestAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
+from segretario.agents.research_agent import ResearchAgent
 from segretario.agents.search_agent import SearchAgent
 from segretario.app.core import SegretarioCore
 from segretario.app.query import query_vault
@@ -252,6 +253,63 @@ def ingest(
     typer.echo(f"{action}: {output['path']}")
 
 
+@app.command()
+def link(
+    url: str,
+    ingest: bool = typer.Option(False, "--ingest", help="Ingest the fetched source after saving."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Fetch a public web link into raw/articles."""
+    settings = load_settings(config_path=config)
+    if not settings.web.enabled:
+        typer.echo("web is disabled")
+        raise typer.Exit(1)
+
+    core = _build_core(settings)
+    result = core.handle(
+        TaskRequest(
+            command="link",
+            payload={
+                "vault_path": settings.vault.path,
+                "url": url,
+                "save_dir": settings.web.save_dir,
+            },
+            risk="low",
+            action="web.public_query",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    saved_path = result.output["path"]
+    typer.echo(f"saved: {saved_path}")
+
+    if ingest:
+        ingest_result = core.handle(
+            TaskRequest(
+                command="ingest",
+                payload={
+                    "vault_path": settings.vault.path,
+                    "source_path": saved_path,
+                    "auto": True,
+                },
+                risk="low",
+                action="knowledge.write",
+            )
+        )
+        if not ingest_result.ok:
+            typer.echo(ingest_result.message)
+            raise typer.Exit(1)
+        output = ingest_result.output
+        action = "updated" if output["updated"] else "created"
+        typer.echo(f"{action}: {output['path']}")
+
+
 def _build_core(settings) -> SegretarioCore:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -267,6 +325,7 @@ def _build_core(settings) -> SegretarioCore:
                 "stats": MaintenanceAgent(),
                 "lint.wiki": MaintenanceAgent(),
                 "ingest": IngestAgent(),
+                "link": ResearchAgent(),
             }
         ),
     )
