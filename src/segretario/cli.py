@@ -222,7 +222,10 @@ def tasks(
         typer.echo("No tasks found.")
         return
     for task in rows:
-        reason = task.get("confirmation_reason") or task.get("last_error") or ""
+        if task["status"] in {"denied", "failed"}:
+            reason = task.get("last_error") or task.get("confirmation_reason") or ""
+        else:
+            reason = task.get("confirmation_reason") or task.get("last_error") or ""
         suffix = f" - {reason}" if reason else ""
         typer.echo(
             f"{task['id']}: {task['command']} [{task['status']}] risk={task['risk']}{suffix}"
