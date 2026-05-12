@@ -32,9 +32,15 @@ uv run segretario query "question"
 uv run segretario link "https://example.com/article"
 uv run segretario web "public research query"
 uv run segretario mail read --query "subject:example"
+uv run segretario mail draft "write a reply to the last email"
+uv run segretario mail draft "Draft body" --to person@example.com --subject "Subject"
 uv run segretario calendar list
+uv run segretario calendar list --today
+uv run segretario calendar list --from 2026-05-13 --to 2026-05-14
 uv run segretario scheduler run-once
 uv run segretario scheduler run-once --execute
+uv run segretario run-maintenance
+uv run segretario watch
 uv run segretario external answer "question from another agent" --source knowledge/example.md
 uv run segretario relink --dry-run
 uv run segretario relink knowledge/ --dry-run
@@ -76,6 +82,7 @@ uv run segretario tasks --limit 5
 uv run segretario task run <TASK_ID>
 uv run segretario approve <TASK_ID>
 uv run segretario task run <TASK_ID>
+uv run segretario mail send <TASK_ID>
 uv run segretario task show <TASK_ID>
 uv run segretario audit verify
 ```

@@ -15,6 +15,7 @@
 - `src/segretario/agents/calendar_agent.py`: fixed agent wrapper for `calendar.list`, `calendar.create`, `calendar.modify`, and `calendar.delete`.
 - `src/segretario/cli.py`: `mail` and `calendar` command groups routed through `SegretarioCore`.
 - `tests/test_google_phase5.py`: connector/tool/CLI confirmation tests.
+- `tests/test_cli_spec_command_gaps.py`: spec command-shape coverage for prompt drafts, task-id send, and calendar list filters.
 
 ## Tasks
 
@@ -24,6 +25,7 @@
 - [x] Implement Gmail and Calendar API clients for authorized read/list and draft interfaces.
 - [x] Implement MailAgent and CalendarAgent wrappers.
 - [x] Add CLI commands through Core/Taskboard/Audit.
+- [x] Add spec-compatible CLI forms for `mail draft "..."`, `mail send <task_id>`, and `calendar list --today/--from/--to`.
 - [x] Run full verification, integrity audit, local CLI tests, and real read-only Google API CLI tests.
 
 ## Safety Boundaries

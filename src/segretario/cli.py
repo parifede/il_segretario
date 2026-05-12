@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -349,22 +350,25 @@ def task_run(
 ) -> None:
     """Run one queued task after confirmation has been approved."""
     settings = load_settings(config_path=config)
+    try:
+        _run_queued_task(settings, task_id)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"task {task_id}: completed")
+
+
+def _run_queued_task(settings, task_id: int) -> None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
     task = taskboard.get_task(task_id)
     if task is None:
-        typer.echo(f"unknown task id: {task_id}")
-        raise typer.Exit(1)
+        raise ValueError(f"unknown task id: {task_id}")
     if task["status"] != TaskStatus.QUEUED.value:
-        typer.echo(f"task {task_id} is not queued")
-        raise typer.Exit(1)
+        raise ValueError(f"task {task_id} is not queued")
 
     payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
-    try:
-        request = payload_store.load(str(task.get("input_ref") or ""))
-    except (FileNotFoundError, ValueError) as exc:
-        typer.echo(str(exc))
-        raise typer.Exit(1) from exc
+    request = payload_store.load(str(task.get("input_ref") or ""))
 
     audit = AuditLog(
         events_path=settings.audit.events_path,
@@ -400,7 +404,6 @@ def task_run(
         "task.completed",
         {"task_id": task_id, "command": request.command, "output": output_ref},
     )
-    typer.echo(f"task {task_id}: completed")
 
 
 @app.command()
@@ -754,9 +757,10 @@ def mail_read(
 
 @mail_app.command("draft")
 def mail_draft(
-    to: str = typer.Option(..., "--to", help="Recipient email address."),
-    subject: str = typer.Option(..., "--subject", help="Draft subject."),
-    body: str = typer.Option(..., "--body", help="Draft body."),
+    prompt: str | None = typer.Argument(None, help="Draft body/prompt."),
+    to: str | None = typer.Option(None, "--to", help="Recipient email address."),
+    subject: str | None = typer.Option(None, "--subject", help="Draft subject."),
+    body: str | None = typer.Option(None, "--body", help="Draft body."),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -766,14 +770,23 @@ def mail_draft(
 ) -> None:
     """Create a local Gmail draft record."""
     settings = load_settings(config_path=config)
+    draft_body = body if body is not None else prompt
+    if not draft_body:
+        typer.echo("mail draft requires --body or a prompt argument")
+        raise typer.Exit(1)
+    draft_to = to or ""
+    draft_subject = subject or "Draft request"
+    google_payload = _google_payload(settings)
+    if not to or not subject:
+        google_payload["use_google"] = False
     result = _build_core(settings).handle(
         TaskRequest(
             command="mail.draft",
             payload={
-                **_google_payload(settings),
-                "to": to,
-                "subject": subject,
-                "body": body,
+                **google_payload,
+                "to": draft_to,
+                "subject": draft_subject,
+                "body": draft_body,
             },
             risk="low",
             action=PermissionKernel.GMAIL_DRAFT,
@@ -787,7 +800,7 @@ def mail_draft(
 
 @mail_app.command("send")
 def mail_send(
-    draft_id: str,
+    draft_or_task_id: str,
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -795,12 +808,25 @@ def mail_send(
         help="Path to segretario.yaml.",
     ),
 ) -> None:
-    """Create a confirmation task for Gmail send."""
+    """Create a Gmail send confirmation task, or run an approved mail.send task id."""
     settings = load_settings(config_path=config)
+    if draft_or_task_id.isdigit():
+        taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+        taskboard.initialize()
+        task = taskboard.get_task(int(draft_or_task_id))
+        if task is not None and task["command"] == "mail.send":
+            try:
+                _run_queued_task(settings, int(draft_or_task_id))
+            except (FileNotFoundError, ValueError) as exc:
+                typer.echo(str(exc))
+                raise typer.Exit(1) from exc
+            typer.echo(f"task {draft_or_task_id}: completed")
+            return
+
     result = _build_core(settings).handle(
         TaskRequest(
             command="mail.send",
-            payload={**_google_payload(settings), "draft_id": draft_id},
+            payload={**_google_payload(settings), "draft_id": draft_or_task_id},
             risk="high",
             action=PermissionKernel.GMAIL_SEND,
         )
@@ -859,6 +885,9 @@ def mail_delete(
 
 @calendar_app.command("list")
 def calendar_list(
+    today: bool = typer.Option(False, "--today", help="Show events dated today."),
+    from_date: str | None = typer.Option(None, "--from", help="Inclusive start date."),
+    to_date: str | None = typer.Option(None, "--to", help="Inclusive end date."),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -868,10 +897,18 @@ def calendar_list(
 ) -> None:
     """List local calendar event metadata."""
     settings = load_settings(config_path=config)
+    if today:
+        current = date.today().isoformat()
+        from_date = current
+        to_date = current
     result = _build_core(settings).handle(
         TaskRequest(
             command="calendar.list",
-            payload=_google_payload(settings),
+            payload={
+                **_google_payload(settings),
+                "from": from_date,
+                "to": to_date,
+            },
             risk="low",
             action=PermissionKernel.CALENDAR_READ,
         )
@@ -882,7 +919,15 @@ def calendar_list(
     if not result.output:
         typer.echo("No events found.")
         return
-    for event in result.output:
+    events = [
+        event
+        for event in result.output
+        if _event_in_calendar_range(event, from_date=from_date, to_date=to_date)
+    ]
+    if not events:
+        typer.echo("No events found.")
+        return
+    for event in events:
         typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
 
 
@@ -977,6 +1022,51 @@ def calendar_delete(
     raise typer.Exit(0 if result.ok else 1)
 
 
+@app.command("run-maintenance")
+def run_maintenance(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Run one bounded local maintenance cycle."""
+    settings = load_settings(config_path=config)
+    scheduler = settings.scheduler.model_copy(
+        update={
+            "enabled": True,
+            "raw_watcher_enabled": False,
+            "inbox_watcher_enabled": False,
+            "daily_digest_enabled": False,
+            "maintenance_budget_minutes": max(settings.scheduler.maintenance_budget_minutes, 1),
+        }
+    )
+    _run_scheduler_cli(settings.model_copy(update={"scheduler": scheduler}), execute=True)
+
+
+@app.command("watch")
+def watch(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Run one bounded local watcher pass."""
+    settings = load_settings(config_path=config)
+    scheduler = settings.scheduler.model_copy(
+        update={
+            "enabled": True,
+            "raw_watcher_enabled": True,
+            "daily_digest_enabled": False,
+            "maintenance_budget_minutes": 0,
+        }
+    )
+    _run_scheduler_cli(settings.model_copy(update={"scheduler": scheduler}), execute=True)
+
+
 @scheduler_app.command("run-once")
 def scheduler_run_once(
     execute: bool = typer.Option(
@@ -993,6 +1083,10 @@ def scheduler_run_once(
 ) -> None:
     """Schedule one bounded scheduler cycle without starting a daemon."""
     settings = load_settings(config_path=config)
+    _run_scheduler_cli(settings, execute=execute)
+
+
+def _run_scheduler_cli(settings, *, execute: bool) -> None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     audit = AuditLog(
         events_path=settings.audit.events_path,
@@ -1004,7 +1098,6 @@ def scheduler_run_once(
         audit=audit,
         execute=execute,
     )
-
     typer.echo(f"Scheduler: {'enabled' if summary.enabled else 'disabled'}")
     typer.echo(f"Preflight: {'ok' if summary.preflight_ok else 'failed'}")
     typer.echo(f"Budget: {summary.budget_minutes} minutes")
@@ -1113,6 +1206,31 @@ def _google_payload(settings) -> dict[str, object]:
             and settings.google.token_path.exists()
         ),
     }
+
+
+def _event_in_calendar_range(
+    event: dict[str, object],
+    *,
+    from_date: str | None,
+    to_date: str | None,
+) -> bool:
+    if from_date is None and to_date is None:
+        return True
+    event_date = _event_date(event)
+    if event_date is None:
+        return True
+    if from_date is not None and event_date < from_date:
+        return False
+    if to_date is not None and event_date > to_date:
+        return False
+    return True
+
+
+def _event_date(event: dict[str, object]) -> str | None:
+    value = str(event.get("when") or "")
+    if len(value) >= 10 and value[4:5] == "-" and value[7:8] == "-":
+        return value[:10]
+    return None
 
 
 def _cli_output_ref(output: object) -> str:

@@ -9,7 +9,7 @@
 - `src/segretario/vault/preflight.py`: read-only vault rule preflight for `AGENTS.md`, meta files, local-only paths, and skip paths.
 - `src/segretario/scheduler/jobs.py`: candidate scheduler jobs and one bounded run function.
 - `src/segretario/taskboard/store.py`: active-command query used as a cooldown/duplicate guard.
-- `src/segretario/cli.py`: `scheduler run-once` command.
+- `src/segretario/cli.py`: `scheduler run-once`, `run-maintenance`, and bounded `watch` commands.
 - `tests/test_scheduler_phase6.py`: Phase 6 preflight, scheduler, audit, taskboard, and CLI tests.
 
 ## Tasks
@@ -21,6 +21,7 @@
 - [x] Execute safe scheduler jobs through Taskboard leases.
 - [x] Append scheduler audit events with hash-chain verification.
 - [x] Add CLI `uv run segretario scheduler run-once` and `--execute`.
+- [x] Add spec-compatible top-level `uv run segretario run-maintenance` and `uv run segretario watch` bounded aliases.
 - [x] Run full verification and real read-only CLI test against `E:\vault`.
 
 ## Safety Boundaries
