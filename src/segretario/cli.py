@@ -6,8 +6,10 @@ import typer
 import yaml
 
 from segretario.agents.ingest_agent import ConfirmationNeededError, ingest_article
+from segretario.app.query import query_vault
 from segretario.config.loader import default_config_path, load_settings
 from segretario.tools.search_tool import search_vault
+from segretario.tools.ollama_tool import build_local_llm
 from segretario.vault.health import lint_vault, vault_stats
 
 app = typer.Typer(no_args_is_help=True)
@@ -112,6 +114,27 @@ def search(
         return
     for result in results:
         typer.echo(f"{result.path}:{result.line}: {result.snippet}")
+
+
+@app.command()
+def query(
+    question: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Answer a vault query using only local vault context and local LLMs."""
+    settings = load_settings(config_path=config)
+    llm = build_local_llm(settings.llm)
+    try:
+        result = query_vault(settings.vault.path, question, llm=llm)
+    except Exception as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(result.answer)
 
 
 @app.command()

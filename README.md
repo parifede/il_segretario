@@ -26,6 +26,7 @@ uv run segretario status
 uv run segretario config show
 uv run segretario vault check
 uv run segretario search "topic"
+uv run segretario query "question"
 uv run segretario lint wiki
 uv run segretario stats
 ```
