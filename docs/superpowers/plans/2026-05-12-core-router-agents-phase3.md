@@ -17,6 +17,7 @@
 - `src/segretario/app/core.py`: create task, enforce permission decision, dispatch, audit outcome.
 - `src/segretario/agents/base.py`: base fixed-agent protocol.
 - `src/segretario/agents/search_agent.py`: wraps `search_vault`.
+- `src/segretario/agents/wiki_maintainer_agent.py`: wraps meta index/log maintenance helpers.
 - `src/segretario/agents/maintenance_agent.py`: wraps `vault_stats` and `lint_vault`.
 - `src/segretario/agents/security_agent.py`: wraps privacy/path checks where needed.
 - `src/segretario/agents/ingest_agent.py`: keep existing ingest function and add class wrapper.
@@ -29,35 +30,35 @@
 
 ### Task 1: Fixed Agent Wrappers
 
-- [ ] Write failing tests for agent wrappers returning stable `CoreResult`-like payloads.
-- [ ] Implement `BaseAgent`, `SearchAgent`, `MaintenanceAgent`, `SecurityAgent`, and `IngestAgent.run`.
-- [ ] Run scoped tests.
+- [x] Write failing tests for agent wrappers returning stable `CoreResult`-like payloads.
+- [x] Implement `BaseAgent`, `SearchAgent`, `WikiMaintainerAgent`, `MaintenanceAgent`, `SecurityAgent`, and `IngestAgent.run`.
+- [x] Run scoped tests.
 
 ### Task 2: TaskRouter
 
-- [ ] Write failing tests for commands `search`, `stats`, `lint.wiki`, and `ingest`.
-- [ ] Implement router lookup with explicit KeyError on unknown commands.
-- [ ] Run scoped tests.
+- [x] Write failing tests for commands `search`, `stats`, `lint.wiki`, and `ingest`.
+- [x] Implement router lookup with explicit KeyError on unknown commands.
+- [x] Run scoped tests.
 
 ### Task 3: SegretarioCore
 
-- [ ] Write failing tests proving core creates task records, dispatches through fixed agents, updates completion/failure, and appends audit entries.
-- [ ] Write failing tests proving denied or confirmation-required decisions do not execute the agent.
-- [ ] Implement minimal `SegretarioCore.handle`.
-- [ ] Run scoped tests.
+- [x] Write failing tests proving core creates task records, dispatches through fixed agents, updates completion/failure, and appends audit entries.
+- [x] Write failing tests proving denied or confirmation-required decisions do not execute the agent.
+- [x] Implement minimal `SegretarioCore.handle`.
+- [x] Run scoped tests.
 
 ### Task 4: CLI Integration
 
-- [ ] Write or adjust CLI tests so current commands still print same output while going through core.
-- [ ] Implement core construction helper in CLI.
-- [ ] Run CLI tests.
+- [x] Write or adjust CLI tests so current commands still print same output while going through core.
+- [x] Implement core construction helper in CLI.
+- [x] Run CLI tests.
 
 ### Task 5: Verification
 
-- [ ] Run full pytest with workspace temp.
-- [ ] Run ruff.
-- [ ] Run integrity auditor and prune scan.
-- [ ] Commit Phase 3.
+- [x] Run full pytest with workspace temp.
+- [x] Run ruff.
+- [x] Run integrity auditor and prune scan.
+- [x] Commit Phase 3.
 
 ## Spec Coverage
 

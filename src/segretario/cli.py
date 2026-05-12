@@ -10,6 +10,7 @@ from segretario.agents.ingest_agent import IngestAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
 from segretario.agents.research_agent import ResearchAgent
 from segretario.agents.search_agent import SearchAgent
+from segretario.agents.wiki_maintainer_agent import WikiMaintainerAgent
 from segretario.app.core import SegretarioCore
 from segretario.app.query import query_vault
 from segretario.app.models import TaskRequest
@@ -326,6 +327,8 @@ def _build_core(settings) -> SegretarioCore:
                 "lint.wiki": MaintenanceAgent(),
                 "ingest": IngestAgent(),
                 "link": ResearchAgent(),
+                "meta.index.ensure": WikiMaintainerAgent(),
+                "meta.log.append": WikiMaintainerAgent(),
             }
         ),
     )

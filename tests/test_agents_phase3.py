@@ -4,6 +4,7 @@ from segretario.agents.ingest_agent import IngestAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
 from segretario.agents.search_agent import SearchAgent
 from segretario.agents.security_agent import SecurityAgent
+from segretario.agents.wiki_maintainer_agent import WikiMaintainerAgent
 from segretario.app.models import TaskRequest
 
 
@@ -72,3 +73,32 @@ def test_security_agent_classifies_path(tmp_path: Path):
 
     assert result["local_only"] is True
     assert result["requires_confirmation"] is True
+
+
+def test_wiki_maintainer_agent_ensures_index_and_appends_log(tmp_path: Path):
+    vault = tmp_path / "vault"
+    agent = WikiMaintainerAgent()
+
+    index = agent.run(
+        TaskRequest(
+            command="meta.index.ensure",
+            payload={"vault_path": vault, "action": "meta.index.ensure"},
+        )
+    )
+    log = agent.run(
+        TaskRequest(
+            command="meta.log.append",
+            payload={
+                "vault_path": vault,
+                "action": "meta.log.append",
+                "entry": "- maintained index",
+            },
+        )
+    )
+
+    assert index["path"] == "meta/index.md"
+    assert (vault / "meta" / "index.md").exists()
+    assert log["path"] == "meta/log.md"
+    assert "- maintained index\n" in (vault / "meta" / "log.md").read_text(
+        encoding="utf-8"
+    )
