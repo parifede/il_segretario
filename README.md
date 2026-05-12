@@ -31,6 +31,8 @@ uv run segretario link "https://example.com/article"
 uv run segretario web "public research query"
 uv run segretario mail read --query "subject:example"
 uv run segretario calendar list
+uv run segretario scheduler run-once
+uv run segretario scheduler run-once --execute
 uv run segretario lint wiki
 uv run segretario stats
 ```
@@ -59,5 +61,6 @@ uv run segretario web "private-context query" --private-context --projection "pr
 - `self/` and `meta/privacy_map.local.json` are no-export paths.
 - Gmail send/archive/delete and Calendar modify/delete require taskboard confirmation.
 - Phase 5 Google commands use local safe interfaces unless real OAuth API usage is explicitly requested.
+- Phase 6 scheduler runs are bounded `run-once` cycles; `--execute` leases and completes safe local jobs without starting a daemon loop.
 - Audit events are append-only JSONL records linked by a hash chain.
 - Google credentials, OAuth tokens, local state, and private dev vault content are gitignored.

@@ -134,6 +134,24 @@ class TaskboardStore:
             ).fetchone()
         return _task_from_row(row) if row is not None else None
 
+    def has_active_command(self, command: str) -> bool:
+        active_statuses = (
+            TaskStatus.QUEUED.value,
+            TaskStatus.RUNNING.value,
+            TaskStatus.WAITING_CONFIRMATION.value,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM tasks
+                WHERE command = ?
+                  AND status IN (?, ?, ?)
+                LIMIT 1
+                """,
+                (command, *active_statuses),
+            ).fetchone()
+        return row is not None
+
     def update_task_status(self, task_id: int, status: str | TaskStatus) -> dict[str, Any]:
         status_value = _status_value(status)
         with self._connect() as connection:

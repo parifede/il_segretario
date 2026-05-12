@@ -20,6 +20,7 @@ from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
 from segretario.policies.permissions import PermissionKernel
+from segretario.scheduler.jobs import run_scheduler_once
 from segretario.taskboard import TaskboardStore
 from segretario.tools.ollama_tool import build_local_llm
 
@@ -29,11 +30,13 @@ vault_app = typer.Typer(help="Vault commands.")
 lint_app = typer.Typer(help="Lint commands.")
 mail_app = typer.Typer(help="Gmail commands.")
 calendar_app = typer.Typer(help="Calendar commands.")
+scheduler_app = typer.Typer(help="Scheduler commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
 app.add_typer(mail_app, name="mail")
 app.add_typer(calendar_app, name="calendar")
+app.add_typer(scheduler_app, name="scheduler")
 
 
 @app.command()
@@ -616,6 +619,53 @@ def calendar_delete(
     )
     typer.echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
+
+
+@scheduler_app.command("run-once")
+def scheduler_run_once(
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Execute safe scheduled jobs after creating them.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Schedule one bounded scheduler cycle without starting a daemon."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    summary = run_scheduler_once(
+        settings,
+        taskboard=taskboard,
+        audit=audit,
+        execute=execute,
+    )
+
+    typer.echo(f"Scheduler: {'enabled' if summary.enabled else 'disabled'}")
+    typer.echo(f"Preflight: {'ok' if summary.preflight_ok else 'failed'}")
+    typer.echo(f"Budget: {summary.budget_minutes} minutes")
+    typer.echo(f"Scheduled: {len(summary.scheduled)}")
+    for job in summary.scheduled:
+        typer.echo(f"- {job.command}: {job.reason}")
+    if summary.skipped:
+        typer.echo("Skipped:")
+        for item in summary.skipped:
+            typer.echo(f"- {item}")
+    if execute:
+        typer.echo(f"Executed: {len(summary.executed)}")
+        for item in summary.executed:
+            if item.output_ref:
+                typer.echo(f"- {item.command}: {item.status} -> {item.output_ref}")
+            else:
+                typer.echo(f"- {item.command}: {item.status}")
 
 
 def _build_core(settings) -> SegretarioCore:
