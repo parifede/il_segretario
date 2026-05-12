@@ -14,6 +14,7 @@ def test_low_risk_actions_are_allowed():
         PermissionKernel.CALENDAR_READ,
         PermissionKernel.CALENDAR_CREATE,
         PermissionKernel.WEB_PUBLIC_QUERY,
+        PermissionKernel.EXTERNAL_ANSWER,
     ):
         assert PermissionKernel.decision_for(action) == PermissionDecision.ALLOW
 

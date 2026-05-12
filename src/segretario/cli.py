@@ -12,6 +12,7 @@ from segretario.agents.mail_agent import MailAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
 from segretario.agents.research_agent import ResearchAgent
 from segretario.agents.search_agent import SearchAgent
+from segretario.agents.security_agent import SecurityAgent
 from segretario.agents.wiki_maintainer_agent import WikiMaintainerAgent
 from segretario.app.core import SegretarioCore
 from segretario.app.query import query_vault
@@ -31,12 +32,14 @@ lint_app = typer.Typer(help="Lint commands.")
 mail_app = typer.Typer(help="Gmail commands.")
 calendar_app = typer.Typer(help="Calendar commands.")
 scheduler_app = typer.Typer(help="Scheduler commands.")
+external_app = typer.Typer(help="External-agent answer commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
 app.add_typer(mail_app, name="mail")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(scheduler_app, name="scheduler")
+app.add_typer(external_app, name="external")
 
 
 @app.command()
@@ -668,6 +671,45 @@ def scheduler_run_once(
                 typer.echo(f"- {item.command}: {item.status}")
 
 
+@external_app.command("answer")
+def external_answer(
+    question: str,
+    source: str = typer.Option(..., "--source", help="Vault-relative source path."),
+    projection: str | None = typer.Option(
+        None,
+        "--projection",
+        help="Privacy-safe projection for local-only source content.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Answer an external-agent request through the output guard."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="external.answer",
+            payload={
+                "vault_path": settings.vault.path,
+                "question": question,
+                "source_path": source,
+                "projection": projection,
+            },
+            risk="low",
+            action=PermissionKernel.EXTERNAL_ANSWER,
+            source="external",
+            requested_by="external-agent",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    typer.echo(result.output["answer"])
+
+
 def _build_core(settings) -> SegretarioCore:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -691,6 +733,7 @@ def _build_core(settings) -> SegretarioCore:
                 "mail.draft": MailAgent(),
                 "calendar.list": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
+                "external.answer": SecurityAgent(),
             }
         ),
     )

@@ -30,6 +30,7 @@ class PermissionKernel:
     CALENDAR_DELETE = "calendar.delete"
     WEB_PUBLIC_QUERY = "web.public_query"
     WEB_PRIVATE_CONTEXT_QUERY = "web.private_context_query"
+    EXTERNAL_ANSWER = "external.answer"
     SELF_PROFILE_WRITE = "self.profile.write"
     POLICY_MODIFY = "policy.modify"
     CONFIG_MODIFY = "config.modify"
@@ -49,6 +50,7 @@ class PermissionKernel:
             CALENDAR_READ,
             CALENDAR_CREATE,
             WEB_PUBLIC_QUERY,
+            EXTERNAL_ANSWER,
         }
     )
     REQUIRES_PROJECTION = frozenset({WEB_PRIVATE_CONTEXT_QUERY})

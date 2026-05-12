@@ -4,6 +4,7 @@ from dataclasses import asdict
 from typing import Any
 
 from segretario.agents.base import BaseAgent
+from segretario.policies.output_guard import prepare_external_answer
 from segretario.policies.privacy import knowledge_export_decision, web_query_decision
 from segretario.vault.paths import classify_vault_path
 
@@ -32,5 +33,19 @@ class SecurityAgent(BaseAgent):
 
         if action == "web.query":
             return asdict(web_query_decision(context_privacy=str(payload["context_privacy"])))
+
+        if action == "external.answer":
+            return asdict(
+                prepare_external_answer(
+                    payload["vault_path"],
+                    source_path=str(payload["source_path"]),
+                    question=str(payload["question"]),
+                    projection=(
+                        str(payload["projection"])
+                        if payload.get("projection") is not None
+                        else None
+                    ),
+                )
+            )
 
         raise ValueError(f"unsupported security action: {action}")
