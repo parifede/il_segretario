@@ -34,6 +34,7 @@ calendar_app = typer.Typer(help="Calendar commands.")
 scheduler_app = typer.Typer(help="Scheduler commands.")
 external_app = typer.Typer(help="External-agent answer commands.")
 audit_app = typer.Typer(help="Audit commands.")
+task_app = typer.Typer(help="Single task commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -42,6 +43,7 @@ app.add_typer(calendar_app, name="calendar")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(external_app, name="external")
 app.add_typer(audit_app, name="audit")
+app.add_typer(task_app, name="task")
 
 
 @app.command()
@@ -232,6 +234,52 @@ def tasks(
         typer.echo(
             f"{task['id']}: {task['command']} [{task['status']}] risk={task['risk']}{suffix}"
         )
+
+
+@task_app.command("show")
+def task_show(
+    task_id: int,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Show one taskboard task."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    task = taskboard.get_task(task_id)
+    if task is None:
+        typer.echo(f"unknown task id: {task_id}")
+        raise typer.Exit(1)
+    for key in (
+        "id",
+        "source",
+        "requested_by",
+        "command",
+        "status",
+        "risk",
+        "assigned_agent",
+        "requires_confirmation",
+        "confirmation_reason",
+        "input_ref",
+        "output_ref",
+        "audit_ref",
+        "created_at",
+        "updated_at",
+        "lease_owner",
+        "lease_expires_at",
+        "retries",
+        "last_error",
+    ):
+        value = task.get(key)
+        if isinstance(value, bool):
+            value = str(value).lower()
+        elif value is None:
+            value = ""
+        typer.echo(f"{key}: {value}")
 
 
 @app.command()

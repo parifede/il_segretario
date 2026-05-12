@@ -38,6 +38,7 @@ uv run segretario relink --dry-run
 uv run segretario relink --apply
 uv run segretario audit verify
 uv run segretario tasks
+uv run segretario task show <task_id>
 uv run segretario approve <task_id>
 uv run segretario deny <task_id>
 uv run segretario lint wiki

@@ -21,6 +21,34 @@ def test_tasks_cli_lists_waiting_confirmation_tasks(tmp_path: Path, monkeypatch)
     assert "high" in result.output
 
 
+def test_task_show_cli_prints_single_task_details(tmp_path: Path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["mail", "send", "draft_test"])
+    task_id = _latest_task_id(tmp_path)
+
+    result = runner.invoke(app, ["task", "show", str(task_id)])
+
+    assert result.exit_code == 0
+    assert f"id: {task_id}" in result.output
+    assert "command: mail.send" in result.output
+    assert "status: waiting_confirmation" in result.output
+    assert "risk: high" in result.output
+    assert "requires_confirmation: true" in result.output
+    assert "confirmation_reason: gmail.send requires confirmation" in result.output
+
+
+def test_task_show_cli_rejects_unknown_task_id(tmp_path: Path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    result = CliRunner().invoke(app, ["task", "show", "999"])
+
+    assert result.exit_code == 1
+    assert "unknown task id: 999" in result.output
+
+
 def test_approve_cli_moves_confirmation_task_to_queue_and_audits(
     tmp_path: Path,
     monkeypatch,
