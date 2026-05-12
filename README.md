@@ -34,6 +34,7 @@ uv run segretario calendar list
 uv run segretario scheduler run-once
 uv run segretario scheduler run-once --execute
 uv run segretario external answer "question from another agent" --source knowledge/example.md
+uv run segretario relink --dry-run
 uv run segretario lint wiki
 uv run segretario stats
 ```

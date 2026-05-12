@@ -230,6 +230,45 @@ def lint_wiki(
 
 
 @app.command()
+def relink(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview missing wikilinks and write a report without editing pages.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Preview missing Obsidian wikilinks."""
+    if not dry_run:
+        typer.echo("relink currently supports --dry-run only")
+        raise typer.Exit(1)
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="relink.dry_run",
+            payload={"vault_path": settings.vault.path, "action": "relink.dry_run"},
+            risk="low",
+            action="output.write",
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    report = result.output
+    typer.echo(f"Relink report: {report['report_path']}")
+    if report["suggestions"]:
+        for suggestion in report["suggestions"]:
+            typer.echo(f"- {suggestion}")
+    else:
+        typer.echo("- no missing links found")
+
+
+@app.command()
 def ingest(
     source: str,
     auto: bool = typer.Option(False, "--auto", help="Run safe automatic ingest."),
@@ -724,6 +763,7 @@ def _build_core(settings) -> SegretarioCore:
                 "search": SearchAgent(),
                 "stats": MaintenanceAgent(),
                 "lint.wiki": MaintenanceAgent(),
+                "relink.dry_run": MaintenanceAgent(),
                 "ingest": IngestAgent(),
                 "link": ResearchAgent(),
                 "web": ResearchAgent(),
