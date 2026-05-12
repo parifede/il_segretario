@@ -11,6 +11,9 @@ class CalendarClientProtocol(Protocol):
     def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
         """List calendar events through a configured client."""
 
+    def delete_event(self, *, event_ref: str) -> dict[str, object]:
+        """Delete a calendar event through a configured client."""
+
 
 class CalendarTool:
     def __init__(
@@ -47,6 +50,24 @@ class CalendarTool:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.events_path.write_text(json.dumps(events, indent=2, sort_keys=True), encoding="utf-8")
         return event
+
+    def delete_event(self, *, event_ref: str) -> dict[str, object]:
+        if self.calendar_client is not None:
+            return self.calendar_client.delete_event(event_ref=event_ref)
+
+        events = _read_events(self.events_path)
+        remaining = [event for event in events if str(event.get("id", "")) != event_ref]
+        if len(remaining) == len(events):
+            raise ValueError(f"unknown calendar event: {event_ref}")
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.events_path.write_text(
+            json.dumps(remaining, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return {
+            "id": event_ref,
+            "deleted": True,
+        }
 
 
 def _read_events(path: Path) -> list[dict[str, object]]:

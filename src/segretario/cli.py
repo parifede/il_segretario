@@ -962,7 +962,7 @@ def calendar_delete(
     result = _build_core(settings).handle(
         TaskRequest(
             command="calendar.delete",
-            payload={"event_ref": event_ref},
+            payload={**_google_payload(settings), "event_ref": event_ref},
             risk="high",
             action=PermissionKernel.CALENDAR_DELETE,
         )
@@ -1085,6 +1085,7 @@ def _build_core(settings) -> SegretarioCore:
                 "mail.delete": MailAgent(),
                 "calendar.list": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
+                "calendar.delete": CalendarAgent(),
                 "external.answer": SecurityAgent(),
             }
         ),

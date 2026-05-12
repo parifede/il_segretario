@@ -24,6 +24,9 @@ class CalendarAgent(BaseAgent):
                 attendees=list(payload.get("attendees", [])),
             )
 
+        if action == "calendar.delete":
+            return tool.delete_event(event_ref=str(payload["event_ref"]))
+
         raise ValueError(f"unsupported calendar action: {action}")
 
 

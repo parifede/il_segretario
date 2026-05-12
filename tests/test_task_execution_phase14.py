@@ -112,6 +112,68 @@ def test_approved_mail_delete_task_can_be_run_from_stored_payload(
     assert _audit(tmp_path).verify() is True
 
 
+def test_approved_calendar_create_with_attendee_can_be_run_from_stored_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    create = runner.invoke(
+        app,
+        ["calendar", "create", "Meeting tomorrow", "--attendee", "person@example.com"],
+    )
+    task_id = _latest_task_id(tmp_path)
+
+    blocked = runner.invoke(app, ["task", "run", str(task_id)])
+    approve = runner.invoke(app, ["approve", str(task_id)])
+    run = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert create.exit_code == 1
+    assert "calendar.create_with_attendees requires confirmation" in create.output
+    assert blocked.exit_code == 1
+    assert f"task {task_id} is not queued" in blocked.output
+    assert approve.exit_code == 0
+    assert run.exit_code == 0
+    assert f"task {task_id}: completed" in run.output
+    events = (tmp_path / "state" / "google" / "calendar_events.json").read_text(
+        encoding="utf-8"
+    )
+    assert "Meeting tomorrow" in events
+    assert "person@example.com" in events
+    assert _audit(tmp_path).verify() is True
+
+
+def test_approved_calendar_delete_task_can_be_run_from_stored_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    create = runner.invoke(app, ["calendar", "create", "Local event"])
+    event_id = create.output.strip().split("event: ", 1)[1]
+    delete = runner.invoke(app, ["calendar", "delete", event_id])
+    task_id = _latest_task_id(tmp_path)
+
+    blocked = runner.invoke(app, ["task", "run", str(task_id)])
+    approve = runner.invoke(app, ["approve", str(task_id)])
+    run = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert delete.exit_code == 1
+    assert "calendar.delete requires confirmation" in delete.output
+    assert blocked.exit_code == 1
+    assert f"task {task_id} is not queued" in blocked.output
+    assert approve.exit_code == 0
+    assert run.exit_code == 0
+    assert f"task {task_id}: completed" in run.output
+    events = (tmp_path / "state" / "google" / "calendar_events.json").read_text(
+        encoding="utf-8"
+    )
+    assert event_id not in events
+    assert _audit(tmp_path).verify() is True
+
+
 def _write_config(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     vault.mkdir()
