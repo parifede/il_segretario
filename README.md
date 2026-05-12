@@ -67,11 +67,30 @@ Prepare a privacy-safe web query from private context:
 uv run segretario web "private-context query" --private-context --projection "privacy-safe query"
 ```
 
+High-risk Gmail and Calendar operations use a confirmation runner:
+
+```powershell
+uv run segretario mail archive <MESSAGE_ID>
+uv run segretario tasks --limit 5
+uv run segretario task run <TASK_ID>
+uv run segretario approve <TASK_ID>
+uv run segretario task run <TASK_ID>
+uv run segretario task show <TASK_ID>
+uv run segretario audit verify
+```
+
+Expected flow:
+
+```text
+waiting_confirmation -> approve -> queued -> task run -> completed
+```
+
 ## Safety Model
 
 - Vault-private work uses local tools and local models.
 - `self/` and `meta/privacy_map.local.json` are no-export paths.
 - Gmail send/archive/delete and Calendar modify/delete require taskboard confirmation.
+- Approved high-risk tasks run from local payload files under `state/task_payloads/`; `task show` exposes short `input_ref` and `output_ref` values, not raw payloads.
 - Phase 5 Google commands use local safe interfaces unless real OAuth API usage is explicitly requested.
 - Phase 6 scheduler runs are bounded `run-once` cycles; `--execute` leases and completes safe local jobs without starting a daemon loop.
 - Phase 7 external answers are filtered by the output guard: public/cloud-safe pages can be shared, local-only pages require a projection, and no-export paths are blocked.
