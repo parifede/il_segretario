@@ -7,7 +7,10 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from segretario.cli import app
-from segretario.connectors.google_oauth import GoogleOAuthConnector
+from segretario.connectors.google_oauth import (
+    REQUIRED_GOOGLE_SCOPES,
+    GoogleOAuthConnector,
+)
 from segretario.policies.permissions import PermissionDecision, PermissionKernel
 from segretario.tools.calendar_tool import CalendarTool
 from segretario.tools.gmail_tool import GmailTool
@@ -56,6 +59,89 @@ def test_google_oauth_status_reports_config_without_reading_secret_contents(tmp_
     assert status.credentials_path == str(credentials)
     assert status.token_path == str(token)
     assert "do-not-print" not in repr(status)
+
+
+def test_google_oauth_status_reports_missing_scopes_without_token_contents(tmp_path: Path):
+    credentials = tmp_path / "credentials.json"
+    token = tmp_path / "token.json"
+    credentials.write_text('{"secret":"do-not-print"}', encoding="utf-8")
+    token.write_text(
+        json.dumps(
+            {
+                "token": "do-not-print",
+                "refresh_token": "do-not-print",
+                "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = GoogleOAuthConnector(credentials_path=credentials, token_path=token).status()
+
+    assert status.configured is True
+    assert "https://www.googleapis.com/auth/gmail.modify" in status.missing_scopes
+    assert "do-not-print" not in repr(status)
+
+
+def test_google_oauth_credentials_reject_missing_required_scopes(tmp_path: Path):
+    credentials = tmp_path / "credentials.json"
+    token = tmp_path / "token.json"
+    credentials.write_text('{"installed":{}}', encoding="utf-8")
+    token.write_text(
+        json.dumps(
+            {
+                "token": "token",
+                "refresh_token": "refresh",
+                "client_id": "client",
+                "client_secret": "secret",
+                "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        GoogleOAuthConnector(credentials_path=credentials, token_path=token).credentials()
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected missing scope error")
+
+    assert "Google token missing OAuth scopes" in message
+    assert "gmail.modify" in message
+    assert "google login --force" in message
+
+
+def test_google_status_cli_reports_missing_scopes(tmp_path: Path, monkeypatch):
+    credentials = tmp_path / "secrets" / "google" / "credentials.json"
+    token = tmp_path / "secrets" / "google" / "token.json"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text('{"secret":"do-not-print"}', encoding="utf-8")
+    token.write_text(
+        json.dumps(
+            {
+                "token": "do-not-print",
+                "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = _write_config(tmp_path, tmp_path / "vault")
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    result = CliRunner().invoke(app, ["google", "status"])
+
+    assert result.exit_code == 0
+    assert "Google: configured" in result.output
+    assert "Scopes: missing" in result.output
+    assert "gmail.modify" in result.output
+    assert "do-not-print" not in result.output
+
+
+def test_required_google_scopes_include_mutating_gmail_and_calendar_access():
+    assert "https://www.googleapis.com/auth/gmail.modify" in REQUIRED_GOOGLE_SCOPES
+    assert "https://www.googleapis.com/auth/gmail.send" in REQUIRED_GOOGLE_SCOPES
+    assert "https://www.googleapis.com/auth/calendar.events" in REQUIRED_GOOGLE_SCOPES
 
 
 def test_gmail_tool_reads_messages_and_creates_local_drafts(tmp_path: Path):

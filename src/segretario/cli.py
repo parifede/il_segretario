@@ -20,6 +20,7 @@ from segretario.app.models import TaskRequest
 from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
+from segretario.connectors.google_oauth import GoogleOAuthConnector
 from segretario.policies.permissions import PermissionKernel
 from segretario.scheduler.jobs import run_scheduler_once
 from segretario.taskboard import TaskboardStore
@@ -33,6 +34,7 @@ vault_app = typer.Typer(help="Vault commands.")
 lint_app = typer.Typer(help="Lint commands.")
 mail_app = typer.Typer(help="Gmail commands.")
 calendar_app = typer.Typer(help="Calendar commands.")
+google_app = typer.Typer(help="Google OAuth commands.")
 scheduler_app = typer.Typer(help="Scheduler commands.")
 external_app = typer.Typer(help="External-agent answer commands.")
 audit_app = typer.Typer(help="Audit commands.")
@@ -42,6 +44,7 @@ app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
 app.add_typer(mail_app, name="mail")
 app.add_typer(calendar_app, name="calendar")
+app.add_typer(google_app, name="google")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(external_app, name="external")
 app.add_typer(audit_app, name="audit")
@@ -101,6 +104,56 @@ def config_show(
     """Print the resolved configuration with secrets paths only, never contents."""
     settings = load_settings(config_path=config)
     typer.echo(yaml.safe_dump(settings.to_safe_dict(), sort_keys=False))
+
+
+@google_app.command("status")
+def google_status(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Show Google OAuth readiness without printing token contents."""
+    settings = load_settings(config_path=config)
+    status = GoogleOAuthConnector(
+        credentials_path=settings.google.credentials_path,
+        token_path=settings.google.token_path,
+    ).status()
+    typer.echo(f"Google: {'configured' if status.configured else 'not configured'}")
+    typer.echo(f"Credentials: {status.credentials_path}")
+    typer.echo(f"Token: {status.token_path}")
+    if status.scopes_ok:
+        typer.echo("Scopes: ok")
+    else:
+        typer.echo("Scopes: missing")
+        for scope in status.missing_scopes:
+            typer.echo(f"- {scope}")
+
+
+@google_app.command("login")
+def google_login(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Recreate the local OAuth token with the currently required scopes.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create or refresh the local Google OAuth token."""
+    settings = load_settings(config_path=config)
+    status = GoogleOAuthConnector(
+        credentials_path=settings.google.credentials_path,
+        token_path=settings.google.token_path,
+    ).login(force=force)
+    typer.echo(f"Google login: {'ok' if status.scopes_ok else 'missing scopes'}")
+    typer.echo(f"Token: {status.token_path}")
 
 
 @vault_app.command("check")

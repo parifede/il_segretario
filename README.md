@@ -24,6 +24,8 @@ The default development vault path is `E:\il_segretario\vault_dev`. The real vau
 ```powershell
 uv run segretario status
 uv run segretario config show
+uv run segretario google status
+uv run segretario google login --force
 uv run segretario vault check
 uv run segretario search "topic"
 uv run segretario query "question"
