@@ -33,6 +33,7 @@ mail_app = typer.Typer(help="Gmail commands.")
 calendar_app = typer.Typer(help="Calendar commands.")
 scheduler_app = typer.Typer(help="Scheduler commands.")
 external_app = typer.Typer(help="External-agent answer commands.")
+audit_app = typer.Typer(help="Audit commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -40,6 +41,7 @@ app.add_typer(mail_app, name="mail")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(external_app, name="external")
+app.add_typer(audit_app, name="audit")
 
 
 @app.command()
@@ -296,6 +298,28 @@ def deny(
         {"task_id": task_id, "command": task["command"], "reason": reason},
     )
     typer.echo(f"denied: {task_id}")
+
+
+@audit_app.command("verify")
+def audit_verify(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Verify the audit hash chain without modifying it."""
+    settings = load_settings(config_path=config)
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    if audit.verify():
+        typer.echo("Audit verify: ok")
+        return
+    typer.echo("Audit verify: failed")
+    raise typer.Exit(1)
 
 
 @lint_app.command("wiki")
