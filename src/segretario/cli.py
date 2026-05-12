@@ -403,6 +403,10 @@ def lint_wiki(
 
 @app.command()
 def relink(
+    scope: str | None = typer.Argument(
+        None,
+        help="Optional vault-relative source scope, for example knowledge/.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -430,7 +434,11 @@ def relink(
     result = _build_core(settings).handle(
         TaskRequest(
             command=command,
-            payload={"vault_path": settings.vault.path, "action": command},
+            payload={
+                "vault_path": settings.vault.path,
+                "action": command,
+                "source_scope": scope,
+            },
             risk="low",
             action=action,
         )

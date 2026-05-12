@@ -35,6 +35,7 @@ uv run segretario scheduler run-once
 uv run segretario scheduler run-once --execute
 uv run segretario external answer "question from another agent" --source knowledge/example.md
 uv run segretario relink --dry-run
+uv run segretario relink knowledge/ --dry-run
 uv run segretario relink --apply
 uv run segretario audit verify
 uv run segretario tasks

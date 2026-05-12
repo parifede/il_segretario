@@ -34,10 +34,18 @@ class RelinkSuggestion:
         return f"{self.source_path} -> [[{self.target_title}]]"
 
 
-def relink_dry_run(vault_path: str | Path, *, today: date | None = None) -> RelinkReport:
+def relink_dry_run(
+    vault_path: str | Path,
+    *,
+    source_scope: str | None = None,
+    today: date | None = None,
+) -> RelinkReport:
     vault = Path(vault_path)
     report_date = today or date.today()
-    suggestions = [suggestion.render() for suggestion in _find_suggestions(vault)]
+    suggestions = [
+        suggestion.render()
+        for suggestion in _find_suggestions(vault, source_scope=source_scope)
+    ]
 
     relative_report = f"output/relink-{report_date.isoformat()}.md"
     report_path = vault / relative_report
@@ -46,12 +54,17 @@ def relink_dry_run(vault_path: str | Path, *, today: date | None = None) -> Reli
     return RelinkReport(path=relative_report, suggestions=suggestions)
 
 
-def relink_apply(vault_path: str | Path, *, today: date | None = None) -> RelinkReport:
+def relink_apply(
+    vault_path: str | Path,
+    *,
+    source_scope: str | None = None,
+    today: date | None = None,
+) -> RelinkReport:
     vault = Path(vault_path)
     report_date = today or date.today()
     applied: list[str] = []
 
-    for suggestion in _find_suggestions(vault):
+    for suggestion in _find_suggestions(vault, source_scope=source_scope):
         if not suggestion.source_path.startswith("knowledge/"):
             continue
         source_path = vault / suggestion.source_path
@@ -70,13 +83,23 @@ def relink_apply(vault_path: str | Path, *, today: date | None = None) -> Relink
     return RelinkReport(path=relative_report, suggestions=applied)
 
 
-def _find_suggestions(vault: Path) -> list[RelinkSuggestion]:
+def _find_suggestions(
+    vault: Path,
+    *,
+    source_scope: str | None = None,
+) -> list[RelinkSuggestion]:
+    normalized_scope = _normalize_source_scope(source_scope)
     pages = _collect_pages(vault)
     title_counts = Counter(page.title.casefold() for page in pages)
     suggestions: list[RelinkSuggestion] = []
     seen_suggestions: set[str] = set()
 
     for page in pages:
+        if normalized_scope is not None and not _is_within_scope(
+            page.relative_path,
+            normalized_scope,
+        ):
+            continue
         for target in pages:
             if page.relative_path == target.relative_path:
                 continue
@@ -94,6 +117,21 @@ def _find_suggestions(vault: Path) -> list[RelinkSuggestion]:
                     suggestions.append(suggestion)
                     seen_suggestions.add(rendered)
     return suggestions
+
+
+def _normalize_source_scope(source_scope: str | None) -> str | None:
+    if source_scope is None:
+        return None
+    normalized = source_scope.replace("\\", "/").strip().strip("/")
+    if not normalized:
+        return None
+    if Path(normalized).is_absolute() or ".." in normalized.split("/"):
+        raise ValueError("relink scope must be a vault-relative path")
+    return normalized
+
+
+def _is_within_scope(relative_path: str, scope: str) -> bool:
+    return relative_path == scope or relative_path.startswith(f"{scope}/")
 
 
 def _collect_pages(vault: Path) -> list[WikiPage]:

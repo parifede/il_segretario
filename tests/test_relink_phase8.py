@@ -80,6 +80,44 @@ def test_relink_cli_writes_report_through_core(tmp_path: Path, monkeypatch):
     assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
 
 
+def test_relink_cli_accepts_source_scope_for_dry_run(tmp_path: Path, monkeypatch):
+    vault = tmp_path / "vault"
+    (vault / "knowledge").mkdir(parents=True)
+    (vault / "output").mkdir(parents=True)
+    (vault / "knowledge" / "alpha.md").write_text("# Alpha\n\nBeta.\n", encoding="utf-8")
+    (vault / "knowledge" / "beta.md").write_text("# Beta\n\nAlpha.\n", encoding="utf-8")
+    (vault / "output" / "digest.md").write_text("# Digest\n\nAlpha.\n", encoding="utf-8")
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    result = CliRunner().invoke(app, ["relink", "knowledge/", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "knowledge/alpha.md -> [[Beta]]" in result.output
+    assert "output/digest.md -> [[Alpha]]" not in result.output
+
+
+def test_relink_apply_respects_source_scope(tmp_path: Path):
+    vault = tmp_path / "vault"
+    alpha = vault / "knowledge" / "alpha.md"
+    beta = vault / "knowledge" / "beta.md"
+    nested = vault / "knowledge" / "nested" / "gamma.md"
+    alpha.parent.mkdir(parents=True)
+    nested.parent.mkdir(parents=True)
+    alpha.write_text("# Alpha\n\nBeta.\n", encoding="utf-8")
+    beta.write_text("# Beta\n\nAlpha.\n", encoding="utf-8")
+    nested.write_text("# Gamma\n\nAlpha and Beta.\n", encoding="utf-8")
+
+    report = relink_apply(vault, source_scope="knowledge/nested", today=date(2026, 5, 12))
+
+    assert report.suggestions == [
+        "knowledge/nested/gamma.md -> [[Alpha]]",
+        "knowledge/nested/gamma.md -> [[Beta]]",
+    ]
+    assert "[[Alpha]] and [[Beta]]" in nested.read_text(encoding="utf-8")
+    assert "[[Beta]]" not in alpha.read_text(encoding="utf-8")
+
+
 def test_relink_apply_updates_only_unambiguous_knowledge_links(tmp_path: Path):
     vault = tmp_path / "vault"
     alpha = vault / "knowledge" / "alpha.md"

@@ -28,7 +28,11 @@ class MaintenanceAgent(BaseAgent):
             today = payload.get("today")
             if today is not None and not isinstance(today, date):
                 raise ValueError("today must be a date")
-            report = relink_dry_run(self.require_vault_path(payload), today=today)
+            report = relink_dry_run(
+                self.require_vault_path(payload),
+                source_scope=_source_scope(payload),
+                today=today,
+            )
             return {
                 "path": report.path,
                 "report_path": report.path,
@@ -39,7 +43,11 @@ class MaintenanceAgent(BaseAgent):
             today = payload.get("today")
             if today is not None and not isinstance(today, date):
                 raise ValueError("today must be a date")
-            report = relink_apply(self.require_vault_path(payload), today=today)
+            report = relink_apply(
+                self.require_vault_path(payload),
+                source_scope=_source_scope(payload),
+                today=today,
+            )
             return {
                 "path": report.path,
                 "report_path": report.path,
@@ -47,3 +55,10 @@ class MaintenanceAgent(BaseAgent):
             }
 
         raise ValueError(f"unsupported maintenance action: {action}")
+
+
+def _source_scope(payload: dict[str, Any]) -> str | None:
+    value = payload.get("source_scope")
+    if value is None:
+        return None
+    return str(value)
