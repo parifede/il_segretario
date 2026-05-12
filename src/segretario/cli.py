@@ -770,7 +770,7 @@ def mail_archive(
     result = _build_core(settings).handle(
         TaskRequest(
             command="mail.archive",
-            payload={"message_ref": message_ref},
+            payload={**_google_payload(settings), "message_ref": message_ref},
             risk="high",
             action=PermissionKernel.GMAIL_ARCHIVE,
         )
@@ -794,7 +794,7 @@ def mail_delete(
     result = _build_core(settings).handle(
         TaskRequest(
             command="mail.delete",
-            payload={"message_ref": message_ref},
+            payload={**_google_payload(settings), "message_ref": message_ref},
             risk="high",
             action=PermissionKernel.GMAIL_DELETE,
         )
@@ -1028,6 +1028,8 @@ def _build_core(settings) -> SegretarioCore:
                 "mail.read": MailAgent(),
                 "mail.draft": MailAgent(),
                 "mail.send": MailAgent(),
+                "mail.archive": MailAgent(),
+                "mail.delete": MailAgent(),
                 "calendar.list": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
                 "external.answer": SecurityAgent(),

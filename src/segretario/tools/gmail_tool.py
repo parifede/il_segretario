@@ -17,6 +17,12 @@ class GmailClientProtocol(Protocol):
     def send_draft(self, *, draft_id: str) -> dict[str, str]:
         """Send a Gmail draft through a configured client."""
 
+    def archive_message(self, *, message_ref: str) -> dict[str, str]:
+        """Archive a Gmail message through a configured client."""
+
+    def delete_message(self, *, message_ref: str) -> dict[str, str]:
+        """Move a Gmail message to trash through a configured client."""
+
 
 class GmailTool:
     def __init__(
@@ -82,6 +88,25 @@ class GmailTool:
             file.write(json.dumps(sent, sort_keys=True) + "\n")
         return sent
 
+    def archive_message(self, *, message_ref: str) -> dict[str, str]:
+        if self.google_client is not None:
+            return self.google_client.archive_message(message_ref=message_ref)
+        archived = _action_record("archived", message_ref)
+        self._append_record("gmail_archived.jsonl", archived)
+        return archived
+
+    def delete_message(self, *, message_ref: str) -> dict[str, str]:
+        if self.google_client is not None:
+            return self.google_client.delete_message(message_ref=message_ref)
+        deleted = _action_record("deleted", message_ref)
+        self._append_record("gmail_deleted.jsonl", deleted)
+        return deleted
+
+    def _append_record(self, file_name: str, record: dict[str, str]) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        with (self.state_dir / file_name).open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record, sort_keys=True) + "\n")
+
 
 def _read_json_list(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -90,3 +115,11 @@ def _read_json_list(path: Path) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         raise ValueError(f"{path} must contain a JSON list")
     return [item for item in raw if isinstance(item, dict)]
+
+
+def _action_record(action: str, message_ref: str) -> dict[str, str]:
+    return {
+        "id": f"{action}_{uuid4().hex[:12]}",
+        "message_ref": message_ref,
+        "created_at": datetime.now(UTC).isoformat(),
+    }

@@ -27,6 +27,12 @@ class MailAgent(BaseAgent):
         if action == "mail.send":
             return tool.send_draft(draft_id=str(payload["draft_id"]))
 
+        if action == "mail.archive":
+            return tool.archive_message(message_ref=str(payload["message_ref"]))
+
+        if action == "mail.delete":
+            return tool.delete_message(message_ref=str(payload["message_ref"]))
+
         raise ValueError(f"unsupported mail action: {action}")
 
 

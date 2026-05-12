@@ -61,6 +61,57 @@ def test_task_run_rejects_waiting_confirmation_task(tmp_path: Path, monkeypatch)
     assert _task_status(tmp_path, task_id) == "waiting_confirmation"
 
 
+def test_approved_mail_archive_task_can_be_run_from_stored_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    archive = runner.invoke(app, ["mail", "archive", "msg_archive_1"])
+    task_id = _latest_task_id(tmp_path)
+
+    blocked = runner.invoke(app, ["task", "run", str(task_id)])
+    approve = runner.invoke(app, ["approve", str(task_id)])
+    run = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert archive.exit_code == 1
+    assert "gmail.archive requires confirmation" in archive.output
+    assert blocked.exit_code == 1
+    assert f"task {task_id} is not queued" in blocked.output
+    assert approve.exit_code == 0
+    assert run.exit_code == 0
+    assert f"task {task_id}: completed" in run.output
+    assert "msg_archive_1" in (
+        tmp_path / "state" / "google" / "gmail_archived.jsonl"
+    ).read_text(encoding="utf-8")
+    assert _audit(tmp_path).verify() is True
+
+
+def test_approved_mail_delete_task_can_be_run_from_stored_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    delete = runner.invoke(app, ["mail", "delete", "msg_delete_1"])
+    task_id = _latest_task_id(tmp_path)
+
+    approve = runner.invoke(app, ["approve", str(task_id)])
+    run = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert delete.exit_code == 1
+    assert "gmail.delete requires confirmation" in delete.output
+    assert approve.exit_code == 0
+    assert run.exit_code == 0
+    assert f"task {task_id}: completed" in run.output
+    assert "msg_delete_1" in (tmp_path / "state" / "google" / "gmail_deleted.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert _audit(tmp_path).verify() is True
+
+
 def _write_config(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     vault.mkdir()

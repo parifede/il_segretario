@@ -74,6 +74,30 @@ class GmailClient:
             "draft_id": draft_id,
         }
 
+    def archive_message(self, *, message_ref: str) -> dict[str, str]:
+        message = (
+            self.service.users()
+            .messages()
+            .modify(userId="me", id=message_ref, body={"removeLabelIds": ["INBOX"]})
+            .execute()
+        )
+        return {
+            "id": str(message.get("id", "")),
+            "message_ref": message_ref,
+        }
+
+    def delete_message(self, *, message_ref: str) -> dict[str, str]:
+        message = (
+            self.service.users()
+            .messages()
+            .trash(userId="me", id=message_ref)
+            .execute()
+        )
+        return {
+            "id": str(message.get("id", "")),
+            "message_ref": message_ref,
+        }
+
 
 def _message_summary(message: dict[str, object]) -> dict[str, str]:
     headers = {
