@@ -152,6 +152,25 @@ class TaskboardStore:
             ).fetchone()
         return row is not None
 
+    def list_tasks(
+        self,
+        *,
+        limit: int = 20,
+        status: str | TaskStatus | None = None,
+    ) -> list[dict[str, Any]]:
+        query = f"SELECT {', '.join(TASK_COLUMNS)} FROM tasks"
+        parameters: tuple[Any, ...]
+        if status is None:
+            parameters = ()
+        else:
+            query += " WHERE status = ?"
+            parameters = (_status_value(status),)
+        query += " ORDER BY id DESC LIMIT ?"
+        parameters = (*parameters, limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_task_from_row(row) for row in rows]
+
     def update_task_status(self, task_id: int, status: str | TaskStatus) -> dict[str, Any]:
         status_value = _status_value(status)
         with self._connect() as connection:

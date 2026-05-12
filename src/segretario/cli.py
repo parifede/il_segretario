@@ -198,6 +198,103 @@ def stats(
     typer.echo(f"total_markdown: {summary['total_markdown']}")
 
 
+@app.command()
+def tasks(
+    status_filter: str | None = typer.Option(
+        None,
+        "--status",
+        help="Only show tasks with this status.",
+    ),
+    limit: int = typer.Option(20, "--limit", help="Maximum number of tasks to show."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """List recent taskboard tasks."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    rows = taskboard.list_tasks(limit=limit, status=status_filter)
+    if not rows:
+        typer.echo("No tasks found.")
+        return
+    for task in rows:
+        reason = task.get("confirmation_reason") or task.get("last_error") or ""
+        suffix = f" - {reason}" if reason else ""
+        typer.echo(
+            f"{task['id']}: {task['command']} [{task['status']}] risk={task['risk']}{suffix}"
+        )
+
+
+@app.command()
+def approve(
+    task_id: int,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Approve a task waiting for confirmation."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    try:
+        task = taskboard.approve_task(task_id)
+    except (KeyError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    audit.append_event(
+        "task.approved",
+        {"task_id": task_id, "command": task["command"]},
+    )
+    typer.echo(f"approved: {task_id}")
+
+
+@app.command()
+def deny(
+    task_id: int,
+    reason: str = typer.Option("operator denied", "--reason", help="Denial reason."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Deny a task waiting for confirmation."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    try:
+        existing = taskboard.get_task(task_id)
+        if existing is None:
+            raise KeyError(f"unknown task id: {task_id}")
+        if existing["status"] != "waiting_confirmation" or not existing["requires_confirmation"]:
+            raise ValueError(f"task {task_id} is not waiting for confirmation")
+        task = taskboard.deny_task(task_id, reason=reason)
+    except (KeyError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    audit.append_event(
+        "task.denied_by_operator",
+        {"task_id": task_id, "command": task["command"], "reason": reason},
+    )
+    typer.echo(f"denied: {task_id}")
+
+
 @lint_app.command("wiki")
 def lint_wiki(
     config: Path | None = typer.Option(

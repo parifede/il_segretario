@@ -35,6 +35,9 @@ uv run segretario scheduler run-once
 uv run segretario scheduler run-once --execute
 uv run segretario external answer "question from another agent" --source knowledge/example.md
 uv run segretario relink --dry-run
+uv run segretario tasks
+uv run segretario approve <task_id>
+uv run segretario deny <task_id>
 uv run segretario lint wiki
 uv run segretario stats
 ```
