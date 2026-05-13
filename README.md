@@ -69,6 +69,8 @@ The project follows `IL_SEGRETARIO_CODEX_SPEC.md` through Phase 6:
 
 Extra commands such as `external answer`, scoped `relink --apply`, and task cancellation are post-spec hardening, not additional spec phases.
 
+The v1.0 acceptance matrix is tracked in `docs/v1.0-acceptance.md`.
+
 Basic ingest for Phase 1:
 
 ```powershell
