@@ -33,6 +33,8 @@ def test_append_event_writes_redacted_payload_and_hash_chain(tmp_path):
     assert second["sequence"] == 2
     assert events[0]["payload"]["secret"] == "[REDACTED]"
     assert events[0]["payload"]["token"] == "[REDACTED]"
+    assert events[0]["payload"]["secret_hash"].startswith("sha256:")
+    assert events[0]["payload"]["token_hash"].startswith("sha256:")
     assert "do-not-store" not in (tmp_path / "events.jsonl").read_text(
         encoding="utf-8"
     )
@@ -85,6 +87,33 @@ def test_redacts_common_secret_key_variants(tmp_path):
     assert "client-secret" not in raw
     assert "Bearer abc" not in raw
     assert "api-key" not in raw
+
+
+def test_redacts_private_content_keys_with_hashes(tmp_path):
+    audit = AuditLog(tmp_path)
+
+    audit.append_event(
+        "protected.file.read",
+        {
+            "source_path": "self/profile.md",
+            "body": "full private profile body",
+            "raw_text": "raw self note",
+            "nested": {"content": "protected nested content"},
+        },
+    )
+
+    event = read_jsonl(tmp_path / "events.jsonl")[0]
+    payload = event["payload"]
+    raw = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "full private profile body" not in raw
+    assert "raw self note" not in raw
+    assert "protected nested content" not in raw
+    assert payload["body"] == "[REDACTED]"
+    assert payload["body_hash"].startswith("sha256:")
+    assert payload["raw_text"] == "[REDACTED]"
+    assert payload["raw_text_hash"].startswith("sha256:")
+    assert payload["nested"]["content"] == "[REDACTED]"
+    assert payload["nested"]["content_hash"].startswith("sha256:")
 
 
 def test_concurrent_appends_keep_hash_chain_valid(tmp_path):

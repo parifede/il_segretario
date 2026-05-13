@@ -14,10 +14,14 @@ from typing import Any
 SENSITIVE_KEYS = {
     "apikey",
     "auth",
+    "body",
+    "content",
     "credential",
     "credentials",
+    "raw",
     "password",
     "secret",
+    "text",
     "token",
 }
 
@@ -110,6 +114,7 @@ def _redact(value: Any) -> Any:
         for key, item in value.items():
             if _is_sensitive_key(key):
                 redacted[key] = "[REDACTED]"
+                redacted[f"{key}_hash"] = f"sha256:{_value_digest(item)}"
             else:
                 redacted[key] = _redact(item)
         return redacted
@@ -135,6 +140,10 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _value_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def _canonical_json(value: dict[str, Any]) -> str:
