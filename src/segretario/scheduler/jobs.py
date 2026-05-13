@@ -187,24 +187,14 @@ def _execute_scheduled_tasks(
     executed: list[SchedulerExecutionResult] = []
 
     for _ in range(max_jobs):
-        task = taskboard.acquire_lease(owner="scheduler", lease_seconds=lease_seconds)
+        task = taskboard.acquire_lease_for_commands(
+            owner="scheduler",
+            lease_seconds=lease_seconds,
+            commands=_scheduler_commands(),
+        )
         if task is None:
             break
         command = str(task["command"])
-        if command not in _scheduler_commands():
-            taskboard.record_failure(
-                int(task["id"]),
-                error=f"unsupported scheduler task: {command}",
-                max_retries=settings.taskboard.max_retries,
-            )
-            executed.append(
-                SchedulerExecutionResult(
-                    command=command,
-                    status=TaskStatus.FAILED.value,
-                    error="unsupported scheduler task",
-                )
-            )
-            continue
         try:
             output_ref = _execute_command(command, settings)
         except Exception as exc:

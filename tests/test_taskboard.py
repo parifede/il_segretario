@@ -208,6 +208,33 @@ def test_acquire_lease_skips_active_lease_and_reclaims_expired(tmp_path):
     assert reclaimed["lease_owner"] == "worker-b"
 
 
+def test_acquire_lease_for_commands_ignores_other_queued_tasks(tmp_path):
+    store = TaskboardStore(tmp_path / "taskboard.sqlite")
+    store.initialize()
+    store.create_task(
+        source="cli",
+        requested_by="operator",
+        command="mail.send",
+        risk="low",
+    )
+    maintenance = store.create_task(
+        source="scheduler",
+        requested_by="segretario",
+        command="maintenance.cycle",
+        risk="low",
+    )
+
+    leased = store.acquire_lease_for_commands(
+        owner="scheduler",
+        lease_seconds=30,
+        commands={"maintenance.cycle"},
+    )
+
+    assert leased["id"] == maintenance["id"]
+    assert leased["command"] == "maintenance.cycle"
+    assert store.get_task(1)["status"] == TaskStatus.QUEUED.value
+
+
 def test_record_failure_requeues_until_max_retries_then_fails(tmp_path):
     store = TaskboardStore(tmp_path / "taskboard.sqlite")
     store.initialize()

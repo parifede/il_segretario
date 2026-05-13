@@ -112,6 +112,41 @@ def test_scheduler_run_once_execute_finishes_safe_jobs_and_writes_outputs(tmp_pa
     assert audit.verify() is True
 
 
+def test_scheduler_execute_ignores_non_scheduler_queued_tasks(tmp_path: Path):
+    vault = tmp_path / "vault"
+    _make_valid_vault(vault)
+    taskboard = TaskboardStore(tmp_path / "state" / "taskboard.sqlite")
+    taskboard.initialize()
+    taskboard.create_task(
+        source="cli",
+        requested_by="owner",
+        command="mail.send",
+        risk="low",
+        assigned_agent="cli",
+    )
+    audit = AuditLog(
+        events_path=tmp_path / "state" / "audit" / "events.jsonl",
+        chain_path=tmp_path / "state" / "audit" / "hash_chain.jsonl",
+    )
+    settings = Settings(
+        vault=VaultSettings(path=vault),
+        scheduler=SchedulerSettings(
+            enabled=True,
+            raw_watcher_enabled=False,
+            daily_digest_enabled=False,
+            maintenance_budget_minutes=7,
+        ),
+    )
+
+    summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit, execute=True)
+
+    assert [item.command for item in summary.executed] == ["maintenance.cycle"]
+    rows = _task_rows(tmp_path / "state" / "taskboard.sqlite")
+    assert ("mail.send", "queued") in rows
+    assert ("maintenance.cycle", "completed") in rows
+    assert audit.verify() is True
+
+
 def test_scheduler_cli_run_once_is_dry_when_disabled(tmp_path: Path, monkeypatch):
     vault = tmp_path / "vault"
     _make_valid_vault(vault)

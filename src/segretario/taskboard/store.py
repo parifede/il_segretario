@@ -325,6 +325,73 @@ class TaskboardStore:
 
         return _task_from_row(updated)
 
+    def acquire_lease_for_commands(
+        self,
+        *,
+        owner: str,
+        lease_seconds: int,
+        commands: set[str],
+    ) -> dict[str, Any] | None:
+        if not commands:
+            return None
+        now = _utc_now()
+        expires_at = _utc_now_plus(seconds=lease_seconds)
+        placeholders = ", ".join("?" for _ in commands)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT {', '.join(TASK_COLUMNS)}
+                FROM tasks
+                WHERE command IN ({placeholders})
+                  AND (
+                    status = ?
+                    OR (
+                        status = ?
+                        AND lease_expires_at IS NOT NULL
+                        AND lease_expires_at <= ?
+                    )
+                  )
+                ORDER BY id
+                LIMIT 1
+                """,
+                (
+                    *sorted(commands),
+                    TaskStatus.QUEUED.value,
+                    TaskStatus.RUNNING.value,
+                    now,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+
+            task_id = row["id"]
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?,
+                    assigned_agent = ?,
+                    lease_owner = ?,
+                    lease_expires_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    TaskStatus.RUNNING.value,
+                    owner,
+                    owner,
+                    expires_at,
+                    now,
+                    task_id,
+                ),
+            )
+            updated = connection.execute(
+                f"SELECT {', '.join(TASK_COLUMNS)} FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+
+        return _task_from_row(updated)
+
     def start_queued_task(
         self,
         task_id: int,
