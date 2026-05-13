@@ -104,6 +104,32 @@ def test_deny_cli_rejects_non_confirmation_task(tmp_path: Path, monkeypatch):
     assert _task_status(tmp_path, task_id) == "completed"
 
 
+def test_task_cancel_cli_cancels_non_terminal_task_and_audits(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["mail", "send", "draft_test"])
+    task_id = _latest_task_id(tmp_path)
+    runner.invoke(app, ["approve", str(task_id)])
+
+    result = runner.invoke(
+        app,
+        ["task", "cancel", str(task_id), "--reason", "stale test task"],
+    )
+
+    assert result.exit_code == 0
+    assert f"cancelled: {task_id}" in result.output
+    assert _task_status(tmp_path, task_id) == "cancelled"
+    assert _audit(tmp_path).verify() is True
+
+    listed = runner.invoke(app, ["tasks", "--limit", "1"])
+
+    assert "stale test task" in listed.output
+
+
 def _write_config(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     vault.mkdir()

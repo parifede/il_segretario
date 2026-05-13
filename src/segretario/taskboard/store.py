@@ -270,6 +270,31 @@ class TaskboardStore:
             )
         return self._require_task(task_id)
 
+    def cancel_task(self, task_id: int, reason: str | None = None) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        if task["status"] in {
+            TaskStatus.COMPLETED.value,
+            TaskStatus.FAILED.value,
+            TaskStatus.DENIED.value,
+            TaskStatus.CANCELLED.value,
+        }:
+            raise ValueError(f"task {task_id} is already terminal")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?,
+                    requires_confirmation = 0,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (TaskStatus.CANCELLED.value, reason, _utc_now(), task_id),
+            )
+        return self._require_task(task_id)
+
     def acquire_lease(
         self,
         *,

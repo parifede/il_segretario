@@ -358,6 +358,37 @@ def task_run(
     typer.echo(f"task {task_id}: completed")
 
 
+@task_app.command("cancel")
+def task_cancel(
+    task_id: int,
+    reason: str = typer.Option("operator cancelled", "--reason", help="Cancellation reason."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Cancel a queued, running, or waiting task with an audit record."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    try:
+        task = taskboard.cancel_task(task_id, reason=reason)
+    except (KeyError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    audit.append_event(
+        "task.cancelled_by_operator",
+        {"task_id": task_id, "command": task["command"], "reason": reason},
+    )
+    typer.echo(f"cancelled: {task_id}")
+
+
 def _run_queued_task(settings, task_id: int) -> None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()

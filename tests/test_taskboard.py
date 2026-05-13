@@ -160,6 +160,23 @@ def test_deny_task_records_reason_and_terminal_status(tmp_path):
     assert denied["last_error"] == "operator denied"
 
 
+def test_cancel_task_records_reason_and_terminal_status(tmp_path):
+    store = TaskboardStore(tmp_path / "taskboard.sqlite")
+    store.initialize()
+    task = store.create_task(
+        source="cli",
+        requested_by="operator",
+        command="mail.send",
+        risk="low",
+    )
+
+    cancelled = store.cancel_task(task["id"], reason="stale task")
+
+    assert cancelled["status"] == TaskStatus.CANCELLED.value
+    assert cancelled["last_error"] == "stale task"
+    assert cancelled["lease_owner"] is None
+
+
 def test_acquire_lease_claims_oldest_available_queued_task(tmp_path):
     store = TaskboardStore(tmp_path / "taskboard.sqlite")
     store.initialize()
