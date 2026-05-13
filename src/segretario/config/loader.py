@@ -4,9 +4,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+import click
 import yaml
 
 from segretario.config.settings import Settings
+
+
+class ConfigFileNotFound(click.ClickException, FileNotFoundError):
+    pass
 
 
 def project_root() -> Path:
@@ -18,9 +23,12 @@ def default_config_path() -> Path:
 
 
 def load_settings(config_path: Path | str | None = None) -> Settings:
-    resolved_config = _select_config_path(config_path)
+    resolved_config, explicit_config = _select_config_path(config_path)
     data: dict[str, Any] = {}
     loaded_config_path: Path | None = None
+
+    if resolved_config and explicit_config and not resolved_config.exists():
+        raise ConfigFileNotFound(f"config file not found: {resolved_config}")
 
     if resolved_config and resolved_config.exists():
         loaded_config_path = resolved_config
@@ -35,13 +43,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
     return settings
 
 
-def _select_config_path(config_path: Path | str | None) -> Path | None:
+def _select_config_path(config_path: Path | str | None) -> tuple[Path | None, bool]:
     if config_path is not None:
-        return Path(config_path)
+        return Path(config_path), True
     env_path = os.getenv("SEGRETARIO_CONFIG")
     if env_path:
-        return Path(env_path)
-    return default_config_path()
+        return Path(env_path), True
+    return default_config_path(), False
 
 
 def _apply_env_overrides(data: dict[str, Any]) -> None:
