@@ -219,11 +219,17 @@ def test_calendar_tool_lists_and_creates_local_events(tmp_path: Path):
 
     created = tool.create_event(summary="Dentist", when="tomorrow 15:00")
     read = tool.get_event(event_ref=str(created["id"]))
+    scheduled = tool.schedule_event(
+        summary="Planning",
+        window_start="2026-05-20T09:00:00",
+        window_end="2026-05-20T11:00:00",
+    )
     updated = tool.update_event(event_ref=str(created["id"]), summary="Updated dentist")
     events = tool.list_events()
 
     assert created["id"].startswith("event_")
     assert read["summary"] == "Dentist"
+    assert scheduled["when"] == "2026-05-20T09:00:00"
     assert updated["id"] == created["id"]
     assert events[0]["summary"] == "Updated dentist"
     assert events[0]["when"] == "tomorrow 15:00"
@@ -283,6 +289,10 @@ def test_calendar_private_create_is_allowed_but_attendees_require_confirmation()
         PermissionKernel.decision_for(PermissionKernel.CALENDAR_CREATE_WITH_ATTENDEES)
         == PermissionDecision.CONFIRM
     )
+    assert (
+        PermissionKernel.decision_for(PermissionKernel.CALENDAR_SCHEDULE)
+        == PermissionDecision.ALLOW
+    )
 
 
 def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
@@ -312,6 +322,18 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     create = CliRunner().invoke(app, ["calendar", "create", "Dentist tomorrow 15:00"])
     event_ref = create.output.split("event:", 1)[1].strip()
     read_event = CliRunner().invoke(app, ["calendar", "read", event_ref])
+    schedule = CliRunner().invoke(
+        app,
+        [
+            "calendar",
+            "schedule",
+            "Planning",
+            "--from",
+            "2026-05-20T09:00:00",
+            "--to",
+            "2026-05-20T11:00:00",
+        ],
+    )
     create_with_attendee = CliRunner().invoke(
         app,
         ["calendar", "create", "Meeting tomorrow", "--attendee", "person@example.com"],
@@ -334,6 +356,8 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert "event:" in create.output
     assert read_event.exit_code == 0
     assert "Dentist tomorrow 15:00" in read_event.output
+    assert schedule.exit_code == 0
+    assert "event:" in schedule.output
     assert create_with_attendee.exit_code == 1
     assert "calendar.create_with_attendees requires confirmation" in create_with_attendee.output
     assert modify.exit_code == 1
@@ -351,6 +375,7 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert ("mail.send", "waiting_confirmation", "high") in rows
     assert ("calendar.list", "completed", "low") in rows
     assert ("calendar.read", "completed", "low") in rows
+    assert ("calendar.schedule", "completed", "low") in rows
     assert ("calendar.create", "completed", "low") in rows
     assert ("calendar.create", "waiting_confirmation", "high") in rows
     assert ("calendar.modify", "waiting_confirmation", "high") in rows

@@ -37,6 +37,20 @@ def test_fetch_link_saves_public_page_to_raw_articles(tmp_path: Path):
     assert "Alpha beta from a local HTTP page." in written
 
 
+def test_fetch_link_strips_utf8_bom_before_title_extraction(tmp_path: Path):
+    vault = tmp_path / "vault"
+    with local_page(
+        "\ufeff<html><body><h1>BOM Research Note</h1><p>Clean body.</p></body></html>"
+    ) as url:
+        result = fetch_link(vault, url)
+
+    assert result.path == "raw/articles/bom-research-note.md"
+    written = (vault / result.path).read_text(encoding="utf-8")
+    assert "\\uFEFF" not in written
+    assert "ï»¿" not in written
+    assert "title: BOM Research Note" in written
+
+
 def test_fetch_link_rejects_non_http_urls(tmp_path: Path):
     with pytest.raises(ValueError, match="http"):
         fetch_link(tmp_path / "vault", "file:///C:/Users/laste/private.md")

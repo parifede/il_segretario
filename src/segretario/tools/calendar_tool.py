@@ -67,6 +67,20 @@ class CalendarTool:
         self.events_path.write_text(json.dumps(events, indent=2, sort_keys=True), encoding="utf-8")
         return event
 
+    def schedule_event(
+        self,
+        *,
+        summary: str,
+        window_start: str,
+        window_end: str,
+    ) -> dict[str, object]:
+        if window_start > window_end:
+            raise ValueError("calendar schedule window is invalid")
+        events = _read_events(self.events_path)
+        if any(str(event.get("when", "")) == window_start for event in events):
+            raise ValueError("calendar schedule window conflicts with an existing event")
+        return self.create_event(summary=summary, when=window_start)
+
     def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
         events = _read_events(self.events_path)
         for event in events:

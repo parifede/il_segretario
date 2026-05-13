@@ -44,6 +44,18 @@ def test_ingest_extracts_key_points_into_frontmatter(tmp_path: Path):
     assert "- Second important point." in written
 
 
+def test_ingest_classifies_plain_source_as_knowledge(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# Knowledge Source\n\nOperational note.\n", encoding="utf-8")
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    written = (vault / "knowledge" / "knowledge-source.md").read_text(encoding="utf-8")
+    assert "content_class: knowledge" in written
+
+
 def test_ingest_adds_inbound_wikilink_from_related_knowledge_page(tmp_path: Path):
     vault = tmp_path / "vault"
     source = vault / "raw" / "articles" / "source.md"

@@ -63,6 +63,7 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
     frontmatter = {
         "title": title,
         "source_path": relative_source,
+        "content_class": "knowledge",
         "privacy": "private",
         "cloud_ok": False,
         "updated": date.today().isoformat(),

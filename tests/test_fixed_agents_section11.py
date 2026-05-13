@@ -21,7 +21,7 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
             {"meta.index.ensure", "meta.log.append"},
             {"MarkdownTool", "VaultTool"},
         ),
-        ResearchAgent: ({"link", "web.query"}, {"WebTool"}),
+        ResearchAgent: ({"link", "web.query"}, {"WebTool", "IngestAgent"}),
         MailAgent: (
             {"mail.read", "mail.draft", "mail.send", "mail.archive", "mail.delete"},
             {"GmailTool"},
@@ -31,6 +31,7 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
                 "calendar.list",
                 "calendar.read",
                 "calendar.create",
+                "calendar.schedule",
                 "calendar.modify",
                 "calendar.delete",
             },

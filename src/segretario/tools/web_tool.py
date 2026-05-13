@@ -67,6 +67,7 @@ def fetch_link(
 
 
 def _to_markdown(text: str, *, content_type: str) -> str:
+    text = text.lstrip("\ufeff")
     if "html" not in content_type.casefold() and not _looks_like_html(text):
         return text.strip()
 

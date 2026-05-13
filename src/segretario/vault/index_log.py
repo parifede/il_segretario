@@ -17,18 +17,61 @@ def ensure_meta_index(vault_root: str | Path) -> Path:
 
     raw_text = index_path.read_text(encoding="utf-8")
     text = raw_text.replace("\ufeff", "")
-    lines = text.splitlines()
-    missing = [heading for heading in CANONICAL_HEADINGS if heading not in lines]
-    if missing or text != raw_text:
-        separator = "" if text.endswith("\n") else "\n"
-        additions = "\n".join(missing)
-        suffix = f"{separator}\n{additions}\n" if missing else ""
-        index_path.write_text(f"{text}{suffix}", encoding="utf-8")
+    normalized = _normalize_index_sections(text)
+    if normalized != raw_text:
+        index_path.write_text(normalized, encoding="utf-8")
     return index_path
 
 
 def _default_index() -> str:
     return "# Index\n\n## Self\n\n## Knowledge\n\n## Output\n"
+
+
+def _normalize_index_sections(text: str) -> str:
+    lines = text.splitlines()
+    prefix: list[str] = []
+    canonical_content: dict[str, list[str]] = {heading: [] for heading in CANONICAL_HEADINGS}
+    other_sections: list[tuple[str, list[str]]] = []
+    current_heading: str | None = None
+    current_other: list[str] | None = None
+
+    for line in lines:
+        if line.startswith("## "):
+            current_heading = line
+            if line in canonical_content:
+                current_other = None
+            else:
+                current_other = []
+                other_sections.append((line, current_other))
+            continue
+
+        if current_heading is None:
+            prefix.append(line)
+            continue
+
+        if current_heading in canonical_content:
+            if line.strip():
+                canonical_content[current_heading].append(line)
+        elif current_other is not None:
+            current_other.append(line)
+
+    output = prefix or ["# Index"]
+    while output and not output[-1].strip():
+        output.pop()
+
+    for heading in CANONICAL_HEADINGS:
+        output.extend(["", heading])
+        seen: set[str] = set()
+        for line in canonical_content[heading]:
+            if line not in seen:
+                output.append(line)
+                seen.add(line)
+
+    for heading, content in other_sections:
+        output.extend(["", heading])
+        output.extend(content)
+
+    return "\n".join(output).rstrip() + "\n"
 
 
 def append_log(vault_root: str | Path, entry: str) -> Path:

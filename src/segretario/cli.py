@@ -767,6 +767,7 @@ def link(
                 "vault_path": settings.vault.path,
                 "url": url,
                 "save_dir": settings.web.save_dir,
+                "ingest": ingest,
             },
             risk="low",
             action="web.public_query",
@@ -777,26 +778,9 @@ def link(
         raise typer.Exit(1)
     saved_path = result.output["path"]
     typer.echo(f"saved: {saved_path}")
-
-    if ingest:
-        ingest_result = core.handle(
-            TaskRequest(
-                command="ingest",
-                payload={
-                    "vault_path": settings.vault.path,
-                    "source_path": saved_path,
-                    "auto": True,
-                },
-                risk="low",
-                action="knowledge.write",
-            )
-        )
-        if not ingest_result.ok:
-            typer.echo(ingest_result.message)
-            raise typer.Exit(1)
-        output = ingest_result.output
-        action = "updated" if output["updated"] else "created"
-        typer.echo(f"{action}: {output['path']}")
+    if ingest and result.output.get("ingested_path"):
+        action = "updated" if result.output.get("ingested_updated") else "created"
+        typer.echo(f"{action}: {result.output['ingested_path']}")
 
 
 @app.command()
@@ -1120,6 +1104,39 @@ def calendar_create(
     typer.echo(f"event: {result.output['id']}")
 
 
+@calendar_app.command("schedule")
+def calendar_schedule(
+    summary: str,
+    from_time: str = typer.Option(..., "--from", help="Earliest allowed event time."),
+    to_time: str = typer.Option(..., "--to", help="Latest allowed event time."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Schedule a local private calendar event inside a constrained window."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.schedule",
+            payload={
+                **_google_payload(settings),
+                "summary": summary,
+                "window_start": from_time,
+                "window_end": to_time,
+            },
+            risk="low",
+            action=PermissionKernel.CALENDAR_SCHEDULE,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    typer.echo(f"event: {result.output['id']}")
+
+
 @calendar_app.command("modify")
 def calendar_modify(
     event_ref: str,
@@ -1345,6 +1362,7 @@ def _agent_command_map():
         "calendar.list": CalendarAgent(),
         "calendar.read": CalendarAgent(),
         "calendar.create": CalendarAgent(),
+        "calendar.schedule": CalendarAgent(),
         "calendar.modify": CalendarAgent(),
         "calendar.delete": CalendarAgent(),
         "external.answer": SecurityAgent(),

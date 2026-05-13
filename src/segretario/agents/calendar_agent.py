@@ -11,6 +11,7 @@ class CalendarAgent(BaseAgent):
             "calendar.list",
             "calendar.read",
             "calendar.create",
+            "calendar.schedule",
             "calendar.modify",
             "calendar.delete",
         }
@@ -36,6 +37,13 @@ class CalendarAgent(BaseAgent):
                 summary=str(payload["summary"]),
                 when=str(payload.get("when", payload["summary"])),
                 attendees=list(payload.get("attendees", [])),
+            )
+
+        if action == "calendar.schedule":
+            return tool.schedule_event(
+                summary=str(payload["summary"]),
+                window_start=str(payload["window_start"]),
+                window_end=str(payload["window_end"]),
             )
 
         if action == "calendar.modify":
