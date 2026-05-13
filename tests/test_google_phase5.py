@@ -39,6 +39,7 @@ class FakeGmailClient:
 class FakeCalendarClient:
     def __init__(self) -> None:
         self.updated_events = []
+        self.deleted_events = []
 
     def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
         return [
@@ -53,6 +54,10 @@ class FakeCalendarClient:
         event = {"id": event_ref, "summary": summary, "when": "2026-05-19T07:00:00Z"}
         self.updated_events.append(event)
         return event
+
+    def delete_event(self, *, event_ref: str) -> dict[str, object]:
+        self.deleted_events.append(event_ref)
+        return {"id": event_ref, "deleted": True}
 
 
 def test_google_oauth_status_reports_config_without_reading_secret_contents(tmp_path: Path):
@@ -234,6 +239,30 @@ def test_calendar_tool_uses_google_client_for_list_when_available(tmp_path: Path
     ]
     assert updated["summary"] == "Updated Real Event"
     assert client.updated_events[0]["id"] == "real_event_1"
+
+
+def test_calendar_tool_includes_and_mutates_local_events_when_google_client_exists(
+    tmp_path: Path,
+):
+    client = FakeCalendarClient()
+    tool = CalendarTool(
+        state_dir=tmp_path / "state" / "google",
+        calendar_client=client,
+    )
+    created = tool.create_event(summary="Local private event", when="2026-05-13 local")
+
+    events = tool.list_events()
+    updated = tool.update_event(
+        event_ref=str(created["id"]),
+        summary="Updated local private event",
+    )
+    deleted = tool.delete_event(event_ref=str(created["id"]))
+
+    assert any(event["id"] == created["id"] for event in events)
+    assert updated["summary"] == "Updated local private event"
+    assert deleted == {"id": created["id"], "deleted": True}
+    assert client.updated_events == []
+    assert client.deleted_events == []
 
 
 def test_calendar_private_create_is_allowed_but_attendees_require_confirmation():

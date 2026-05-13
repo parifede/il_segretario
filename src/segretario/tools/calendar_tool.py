@@ -30,9 +30,10 @@ class CalendarTool:
         self.calendar_client = calendar_client
 
     def list_events(self) -> list[dict[str, object]]:
+        local_events = _read_events(self.events_path)
         if self.calendar_client is not None:
-            return self.calendar_client.list_events()
-        return _read_events(self.events_path)
+            return [*self.calendar_client.list_events(), *local_events]
+        return local_events
 
     def create_event(
         self,
@@ -55,9 +56,6 @@ class CalendarTool:
         return event
 
     def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
-        if self.calendar_client is not None:
-            return self.calendar_client.update_event(event_ref=event_ref, summary=summary)
-
         events = _read_events(self.events_path)
         for event in events:
             if str(event.get("id", "")) == event_ref:
@@ -69,25 +67,26 @@ class CalendarTool:
                     encoding="utf-8",
                 )
                 return event
+        if self.calendar_client is not None:
+            return self.calendar_client.update_event(event_ref=event_ref, summary=summary)
         raise ValueError(f"unknown calendar event: {event_ref}")
 
     def delete_event(self, *, event_ref: str) -> dict[str, object]:
-        if self.calendar_client is not None:
-            return self.calendar_client.delete_event(event_ref=event_ref)
-
         events = _read_events(self.events_path)
         remaining = [event for event in events if str(event.get("id", "")) != event_ref]
-        if len(remaining) == len(events):
-            raise ValueError(f"unknown calendar event: {event_ref}")
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.events_path.write_text(
-            json.dumps(remaining, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        return {
-            "id": event_ref,
-            "deleted": True,
-        }
+        if len(remaining) != len(events):
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            self.events_path.write_text(
+                json.dumps(remaining, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            return {
+                "id": event_ref,
+                "deleted": True,
+            }
+        if self.calendar_client is not None:
+            return self.calendar_client.delete_event(event_ref=event_ref)
+        raise ValueError(f"unknown calendar event: {event_ref}")
 
 
 def _read_events(path: Path) -> list[dict[str, object]]:
