@@ -63,6 +63,22 @@ def test_task_run_rejects_waiting_confirmation_task(tmp_path: Path, monkeypatch)
     assert _task_status(tmp_path, task_id) == "waiting_confirmation"
 
 
+def test_failed_high_risk_task_run_does_not_requeue(tmp_path: Path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["calendar", "delete", "missing_event"])
+    task_id = _latest_task_id(tmp_path)
+    runner.invoke(app, ["approve", str(task_id)])
+
+    result = runner.invoke(app, ["task", "run", str(task_id)])
+
+    assert result.exit_code == 1
+    assert "unknown calendar event: missing_event" in result.output
+    assert _task_status(tmp_path, task_id) == "failed"
+    assert _audit(tmp_path).verify() is True
+
+
 def test_approved_mail_archive_task_can_be_run_from_stored_payload(
     tmp_path: Path,
     monkeypatch,

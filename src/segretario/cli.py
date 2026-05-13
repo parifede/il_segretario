@@ -386,10 +386,15 @@ def _run_queued_task(settings, task_id: int) -> None:
         )
         output = _build_core(settings).router.agent_for(request.command).run(request)
     except Exception as exc:
+        max_retries = (
+            1
+            if str(task.get("risk", "")).lower() in {"high", "critical"}
+            else settings.taskboard.max_retries
+        )
         taskboard.record_failure(
             task_id,
             error=str(exc),
-            max_retries=settings.taskboard.max_retries,
+            max_retries=max_retries,
         )
         audit.append_event(
             "task.failed",
