@@ -280,5 +280,60 @@ def test_record_failure_requeues_until_max_retries_then_fails(tmp_path):
     assert final["last_error"] == "still broken"
 
 
+def test_record_failure_requeues_with_cooldown_before_next_lease(tmp_path):
+    store = TaskboardStore(tmp_path / "taskboard.sqlite")
+    store.initialize()
+    task = store.create_task(
+        source="cli",
+        requested_by="operator",
+        command="flaky",
+        risk="medium",
+    )
+    store.acquire_lease(owner="worker-a", lease_seconds=30)
+
+    retry = store.record_failure(
+        task["id"],
+        error="temporary",
+        max_retries=2,
+        cooldown_seconds=60,
+    )
+
+    assert retry["status"] == TaskStatus.QUEUED.value
+    assert retry["lease_owner"] is None
+    assert _is_future_timestamp(retry["lease_expires_at"])
+    assert store.acquire_lease(owner="worker-b", lease_seconds=30) is None
+
+    store.force_expire_lease(task["id"])
+    leased_again = store.acquire_lease(owner="worker-b", lease_seconds=30)
+
+    assert leased_again is not None
+    assert leased_again["id"] == task["id"]
+
+
+def test_start_queued_task_respects_retry_cooldown(tmp_path):
+    store = TaskboardStore(tmp_path / "taskboard.sqlite")
+    store.initialize()
+    task = store.create_task(
+        source="cli",
+        requested_by="operator",
+        command="flaky",
+        risk="medium",
+    )
+    store.acquire_lease(owner="worker-a", lease_seconds=30)
+    store.record_failure(
+        task["id"],
+        error="temporary",
+        max_retries=2,
+        cooldown_seconds=60,
+    )
+
+    try:
+        store.start_queued_task(task["id"], owner="cli", lease_seconds=30)
+    except ValueError as exc:
+        assert "cooldown" in str(exc)
+    else:
+        raise AssertionError("expected cooldown to block manual task start")
+
+
 def _is_future_timestamp(value):
     return datetime.fromisoformat(value) > datetime.now(timezone.utc)

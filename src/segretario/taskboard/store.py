@@ -309,7 +309,13 @@ class TaskboardStore:
                 f"""
                 SELECT {', '.join(TASK_COLUMNS)}
                 FROM tasks
-                WHERE status = ?
+                WHERE (
+                        status = ?
+                        AND (
+                            lease_expires_at IS NULL
+                            OR lease_expires_at <= ?
+                        )
+                   )
                    OR (
                         status = ?
                         AND lease_expires_at IS NOT NULL
@@ -318,7 +324,7 @@ class TaskboardStore:
                 ORDER BY id
                 LIMIT 1
                 """,
-                (TaskStatus.QUEUED.value, TaskStatus.RUNNING.value, now),
+                (TaskStatus.QUEUED.value, now, TaskStatus.RUNNING.value, now),
             ).fetchone()
             if row is None:
                 return None
@@ -370,7 +376,13 @@ class TaskboardStore:
                 FROM tasks
                 WHERE command IN ({placeholders})
                   AND (
-                    status = ?
+                    (
+                        status = ?
+                        AND (
+                            lease_expires_at IS NULL
+                            OR lease_expires_at <= ?
+                        )
+                    )
                     OR (
                         status = ?
                         AND lease_expires_at IS NOT NULL
@@ -383,6 +395,7 @@ class TaskboardStore:
                 (
                     *sorted(commands),
                     TaskStatus.QUEUED.value,
+                    now,
                     TaskStatus.RUNNING.value,
                     now,
                 ),
@@ -430,6 +443,8 @@ class TaskboardStore:
         if task["requires_confirmation"]:
             raise ValueError(f"task {task_id} still requires confirmation")
         now = _utc_now()
+        if task["lease_expires_at"] is not None and task["lease_expires_at"] > now:
+            raise ValueError(f"task {task_id} is in retry cooldown")
         expires_at = _utc_now_plus(seconds=lease_seconds)
         with self._connect() as connection:
             connection.execute(
@@ -467,6 +482,7 @@ class TaskboardStore:
         *,
         error: str,
         max_retries: int,
+        cooldown_seconds: int = 0,
     ) -> dict[str, Any]:
         task = self._require_task(task_id)
         retries = int(task["retries"]) + 1
@@ -474,6 +490,11 @@ class TaskboardStore:
             TaskStatus.FAILED.value
             if retries >= max_retries
             else TaskStatus.QUEUED.value
+        )
+        cooldown_until = (
+            _utc_now_plus(seconds=max(cooldown_seconds, 0))
+            if status == TaskStatus.QUEUED.value and cooldown_seconds > 0
+            else None
         )
         with self._connect() as connection:
             connection.execute(
@@ -483,11 +504,11 @@ class TaskboardStore:
                     retries = ?,
                     last_error = ?,
                     lease_owner = NULL,
-                    lease_expires_at = NULL,
+                    lease_expires_at = ?,
                     updated_at = ?
                 WHERE id = ?
                 """,
-                (status, retries, error, _utc_now(), task_id),
+                (status, retries, error, cooldown_until, _utc_now(), task_id),
             )
         return self._require_task(task_id)
 

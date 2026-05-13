@@ -202,6 +202,7 @@ def _execute_scheduled_tasks(
                 int(task["id"]),
                 error=str(exc),
                 max_retries=settings.taskboard.max_retries,
+                cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
             )
             audit.append_event(
                 "scheduler.task_failed",

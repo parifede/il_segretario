@@ -36,6 +36,7 @@ class TaskboardSettings(BaseModel):
     human_mirror_path: Path = Field(default_factory=lambda: _root() / "state" / "bacheca.md")
     lease_minutes: int = 15
     max_retries: int = 3
+    retry_cooldown_seconds: int = 60
 
 
 class AuditSettings(BaseModel):

@@ -429,6 +429,7 @@ def _run_queued_task(settings, task_id: int) -> None:
             task_id,
             error=str(exc),
             max_retries=max_retries,
+            cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
         )
         audit.append_event(
             "task.failed",
