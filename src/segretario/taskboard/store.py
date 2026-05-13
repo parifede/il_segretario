@@ -260,6 +260,7 @@ class TaskboardStore:
                 UPDATE tasks
                 SET status = ?,
                     requires_confirmation = 0,
+                    confirmation_reason = NULL,
                     lease_owner = NULL,
                     lease_expires_at = NULL,
                     last_error = ?,
@@ -285,6 +286,7 @@ class TaskboardStore:
                 UPDATE tasks
                 SET status = ?,
                     requires_confirmation = 0,
+                    confirmation_reason = NULL,
                     lease_owner = NULL,
                     lease_expires_at = NULL,
                     last_error = ?,

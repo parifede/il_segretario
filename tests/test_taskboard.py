@@ -157,6 +157,7 @@ def test_deny_task_records_reason_and_terminal_status(tmp_path):
 
     assert denied["status"] == TaskStatus.DENIED.value
     assert denied["requires_confirmation"] is False
+    assert denied["confirmation_reason"] is None
     assert denied["last_error"] == "operator denied"
 
 
@@ -173,6 +174,8 @@ def test_cancel_task_records_reason_and_terminal_status(tmp_path):
     cancelled = store.cancel_task(task["id"], reason="stale task")
 
     assert cancelled["status"] == TaskStatus.CANCELLED.value
+    assert cancelled["requires_confirmation"] is False
+    assert cancelled["confirmation_reason"] is None
     assert cancelled["last_error"] == "stale task"
     assert cancelled["lease_owner"] is None
 
