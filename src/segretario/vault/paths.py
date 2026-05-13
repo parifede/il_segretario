@@ -37,6 +37,9 @@ def classify_vault_path(path: str, *, operation: str = "read") -> VaultPathPolic
             requires_explicit_profile_update=is_profile_write,
         )
 
+    if parts and parts[0] == "output":
+        return VaultPathPolicy(path=normalized, local_only=True)
+
     return VaultPathPolicy(path=normalized)
 
 

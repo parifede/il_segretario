@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from segretario.vault.index_log import append_log
+from segretario.vault.index_log import KNOWLEDGE_HEADING, append_log, ensure_meta_index
 from segretario.agents.base import BaseAgent
 
 
@@ -42,7 +42,7 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
     if source.is_symlink():
         raise ValueError("ingest source cannot be a symlink")
 
-    raw = source.read_text(encoding="utf-8")
+    raw = source.read_text(encoding="utf-8").lstrip("\ufeff")
     if _looks_personal(raw):
         raise ConfirmationNeededError("personal-looking content requires confirmation")
 
@@ -146,19 +146,28 @@ def _render_knowledge_page(frontmatter: dict[str, object], title: str, body: str
 
 
 def _update_index(vault: Path, title: str) -> None:
-    index_path = vault / "meta" / "index.md"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    if index_path.exists():
-        index = index_path.read_text(encoding="utf-8")
-    else:
-        index = "# Index\n"
+    index_path = ensure_meta_index(vault)
+    index = index_path.read_text(encoding="utf-8")
 
     entry = f"- [[{title}]]"
     if entry not in index.splitlines():
-        index = index.rstrip() + f"\n{entry}\n"
+        index = _insert_under_knowledge(index, entry)
         index_path.write_text(index, encoding="utf-8")
-    elif not index_path.exists():
-        index_path.write_text(index, encoding="utf-8")
+
+
+def _insert_under_knowledge(index: str, entry: str) -> str:
+    lines = index.splitlines()
+    try:
+        heading_index = lines.index(KNOWLEDGE_HEADING)
+    except ValueError:
+        lines.append(KNOWLEDGE_HEADING)
+        heading_index = len(lines) - 1
+
+    insert_at = heading_index + 1
+    while insert_at < len(lines) and not lines[insert_at].startswith("## "):
+        insert_at += 1
+    lines.insert(insert_at, entry)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _append_log(vault: Path, source: str, target: str) -> None:

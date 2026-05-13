@@ -27,6 +27,34 @@ def test_ingest_markdown_creates_knowledge_page_index_and_log(tmp_path: Path):
     ).read_text(encoding="utf-8")
 
 
+def test_ingest_does_not_modify_raw_source(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    source.parent.mkdir(parents=True)
+    original = "# Source Topic\n\nAlpha beta topic.\n"
+    source.write_text(original, encoding="utf-8")
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    assert source.read_text(encoding="utf-8") == original
+
+
+def test_ingest_strips_utf8_bom_from_title_and_body(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "bom.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("\ufeff# BOM Title\n\nBody.\n", encoding="utf-8")
+
+    ingest_article(vault, "raw/articles/bom.md", auto=True)
+
+    written = (vault / "knowledge" / "bom-title.md").read_text(encoding="utf-8")
+    index = (vault / "meta" / "index.md").read_text(encoding="utf-8")
+    assert "\ufeff" not in written
+    assert "\ufeff" not in index
+    assert "title: BOM Title\n" in written
+    assert "- [[BOM Title]]" in index
+
+
 def test_ingest_text_creates_wikilinks_from_markdown_links(tmp_path: Path):
     vault = tmp_path / "vault"
     source = vault / "raw" / "articles" / "plain.txt"

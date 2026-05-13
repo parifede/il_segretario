@@ -17,6 +17,14 @@ def test_self_paths_are_local_only():
     assert policy.export_allowed is False
 
 
+def test_output_paths_are_local_only_by_default():
+    policy = classify_vault_path("output/personal_reports/summary.md")
+
+    assert policy.skip is False
+    assert policy.local_only is True
+    assert policy.export_allowed is False
+
+
 def test_self_profile_writes_require_explicit_update_and_confirmation():
     policy = classify_vault_path("self/profile.md", operation="write")
 

@@ -41,17 +41,36 @@ def test_ensure_meta_index_creates_index_with_single_knowledge_heading(tmp_path)
 
     assert first == tmp_path / "meta" / "index.md"
     assert second == first
+    text = first.read_text(encoding="utf-8")
+    assert text.count("## Self") == 1
     assert first.read_text(encoding="utf-8").count("## Knowledge") == 1
+    assert text.count("## Output") == 1
 
 
-def test_ensure_meta_index_does_not_duplicate_existing_knowledge_heading(tmp_path):
+def test_ensure_meta_index_does_not_duplicate_existing_canonical_headings(tmp_path):
     index = tmp_path / "meta" / "index.md"
     index.parent.mkdir()
-    index.write_text("# Index\n\n## Knowledge\n\n- Existing\n", encoding="utf-8")
+    index.write_text(
+        "# Index\n\n## Self\n\n## Knowledge\n\n- Existing\n\n## Output\n",
+        encoding="utf-8",
+    )
 
     ensure_meta_index(tmp_path)
 
-    assert index.read_text(encoding="utf-8").count("## Knowledge") == 1
+    text = index.read_text(encoding="utf-8")
+    assert text.count("## Self") == 1
+    assert text.count("## Knowledge") == 1
+    assert text.count("## Output") == 1
+
+
+def test_ensure_meta_index_strips_utf8_bom(tmp_path):
+    index = tmp_path / "meta" / "index.md"
+    index.parent.mkdir()
+    index.write_text("\ufeff# Index\n\n## Knowledge\n\n- [[\ufeffBad Title]]\n", encoding="utf-8")
+
+    ensure_meta_index(tmp_path)
+
+    assert "\ufeff" not in index.read_text(encoding="utf-8")
 
 
 def test_append_log_appends_without_rewriting_existing_entries(tmp_path):
