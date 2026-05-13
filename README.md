@@ -55,6 +55,20 @@ uv run segretario lint wiki
 uv run segretario stats
 ```
 
+## Spec Phases
+
+The project follows `IL_SEGRETARIO_CODEX_SPEC.md` through Phase 6:
+
+- Phase 0: bootstrap CLI, config, status, tests.
+- Phase 1: vault adapter, path classification, search, ingest, lint, stats.
+- Phase 2: Ollama-backed local query flow with graceful offline failure.
+- Phase 3: SegretarioCore, task routing, agents, taskboard, audit.
+- Phase 4: web/link ingestion with privacy projection checks.
+- Phase 5: Google OAuth, Gmail, Calendar, and confirmation gates.
+- Phase 6: watcher/scheduler run-once flows with budgets, leases, and cooldowns.
+
+Extra commands such as `external answer`, scoped `relink --apply`, and task cancellation are post-spec hardening, not additional spec phases.
+
 Basic ingest for Phase 1:
 
 ```powershell
@@ -101,6 +115,10 @@ waiting_confirmation -> approve -> queued -> task run -> completed
 - Approved high-risk tasks run from local payload files under `state/task_payloads/`; `task show` exposes short `input_ref` and `output_ref` values, not raw payloads.
 - Phase 5 Google commands use local safe interfaces unless real OAuth API usage is explicitly requested.
 - Phase 6 scheduler runs are bounded `run-once` cycles; `--execute` leases and completes safe local jobs without starting a daemon loop.
-- Phase 7 external answers are filtered by the output guard: public/cloud-safe pages can be shared, local-only pages require a projection, and no-export paths are blocked.
+- External answers are filtered by the output guard: public/cloud-safe pages can be shared, local-only pages require a projection, and no-export paths are blocked.
 - Audit events are append-only JSONL records linked by a hash chain.
 - Google credentials, OAuth tokens, local state, and private dev vault content are gitignored.
+
+## Stop Conditions
+
+Stop and ask before continuing if a requested change would require guessing product behavior, deleting or overwriting user vault content, sending raw private context to the web, writing to `self/profile/` without explicit confirmation, or running a high-risk operation without a taskboard confirmation path.
