@@ -29,15 +29,15 @@ uv run segretario audit verify
 ```
 
 ```powershell
-uv run segretario calendar create "Output ref test" --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario calendar modify <EVENT_ID> --summary "Updated output ref test" --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario approve <TASK_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario task run <TASK_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario calendar delete <EVENT_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario approve <TASK_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario task run <TASK_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario task show <TASK_ID> --config state\phase18-output-ref-test\segretario.yaml
-uv run segretario audit verify --config state\phase18-output-ref-test\segretario.yaml
+uv run segretario calendar create "Output ref test" --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario calendar modify <EVENT_ID> --summary "Updated output ref test" --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario approve <TASK_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario task run <TASK_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario calendar delete <EVENT_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario approve <TASK_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario task run <TASK_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario task show <TASK_ID> --config state\output-ref-hardening-test\segretario.yaml
+uv run segretario audit verify --config state\output-ref-hardening-test\segretario.yaml
 ```
 
 ## Real Evidence Recorded In Chat
@@ -45,7 +45,7 @@ uv run segretario audit verify --config state\phase18-output-ref-test\segretario
 - Gmail OAuth scopes were missing, then fixed with `google login --force`.
 - `google status` reported `Scopes: ok` after re-login.
 - Gmail archive with a real message id completed as task `35`.
-- Calendar delete local test completed as task `4` in phase18 state.
+- Calendar delete local test completed as task `4` in output-ref hardening state.
 - `task show` displayed `output_ref: event_4fb14ec48eb0`.
 - Calendar modify is part of Phase 5 and must be confirmed, run from stored payload, and checked against persisted state.
 - `audit verify` returned `ok`.

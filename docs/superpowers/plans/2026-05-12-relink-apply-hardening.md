@@ -1,4 +1,4 @@
-# Relink Apply Phase 10 Implementation Plan
+# Relink Apply Relink Apply Hardening Implementation Plan
 
 **Goal:** Add a controlled `relink --apply` command that applies unambiguous wikilink suggestions after the dry-run analyzer has found them.
 
@@ -9,7 +9,7 @@
 - `src/segretario/vault/relink.py`: apply mode and report renderer.
 - `src/segretario/agents/maintenance_agent.py`: `relink.apply` action.
 - `src/segretario/cli.py`: `uv run segretario relink --apply`.
-- `tests/test_relink_phase8.py`: apply unit and CLI tests.
+- `tests/test_relink_post_spec_relink.py`: apply unit and CLI tests.
 
 ## Tasks
 

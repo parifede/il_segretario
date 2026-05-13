@@ -1,4 +1,4 @@
-# Google OAuth Scopes Phase 16 Implementation Plan
+# Google OAuth Scopes Google OAuth Scopes Hardening Implementation Plan
 
 **Goal:** Detect insufficient Google OAuth scopes before mutating Gmail/Calendar calls and provide a local CLI path to re-login with the required scopes.
 

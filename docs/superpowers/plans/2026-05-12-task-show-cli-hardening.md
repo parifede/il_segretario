@@ -1,11 +1,11 @@
-# Task Show CLI Phase 12 Implementation Plan
+# Task Show CLI Task Show CLI Hardening Implementation Plan
 
 **Goal:** Add the spec-listed `uv run segretario task show <task_id>` command for inspecting a single taskboard row from the CLI.
 
 ## File Structure
 
 - `src/segretario/cli.py`: `task show` subcommand.
-- `tests/test_tasks_cli_phase9.py`: single-task display and missing-id behavior.
+- `tests/test_tasks_cli_taskboard_hardening.py`: single-task display and missing-id behavior.
 - `README.md`: command listing.
 
 ## Tasks

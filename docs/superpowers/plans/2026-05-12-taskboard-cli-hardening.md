@@ -1,4 +1,4 @@
-# Taskboard CLI Phase 9 Implementation Plan
+# Taskboard CLI Taskboard CLI Hardening Implementation Plan
 
 **Goal:** Add the spec MVP commands `tasks`, `approve <task_id>`, and `deny <task_id>` so operators do not need to inspect SQLite manually.
 
@@ -8,7 +8,7 @@
 
 - `src/segretario/taskboard/store.py`: recent task listing.
 - `src/segretario/cli.py`: `tasks`, `approve`, and `deny` commands.
-- `tests/test_tasks_cli_phase9.py`: CLI lifecycle tests using real confirmation-producing commands.
+- `tests/test_tasks_cli_taskboard_hardening.py`: CLI lifecycle tests using real confirmation-producing commands.
 
 ## Tasks
 

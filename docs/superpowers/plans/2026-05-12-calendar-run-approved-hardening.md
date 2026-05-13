@@ -1,4 +1,4 @@
-# Calendar Run Approved Phase 17 Implementation Plan
+# Calendar Run Approved Calendar Run Hardening Implementation Plan
 
 **Goal:** Complete approved Calendar task execution for attendee creates and deletes through `task run`.
 
@@ -8,7 +8,7 @@
 - `src/segretario/connectors/calendar_client.py`: Google Calendar event delete call.
 - `src/segretario/agents/calendar_agent.py`: route `calendar.delete`.
 - `src/segretario/cli.py`: persist executable delete payloads and route command.
-- `tests/test_task_execution_phase14.py`: approved attendee create and delete execution.
+- `tests/test_task_execution_task_run_hardening.py`: approved attendee create and delete execution.
 
 ## Tasks
 

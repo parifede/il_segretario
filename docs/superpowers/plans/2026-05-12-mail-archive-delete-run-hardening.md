@@ -1,4 +1,4 @@
-# Mail Archive Delete Run Phase 15 Implementation Plan
+# Mail Archive Delete Run Mail Archive/Delete Hardening Implementation Plan
 
 **Goal:** Let approved `mail.archive` and `mail.delete` confirmation tasks execute through `task run`.
 
@@ -8,7 +8,7 @@
 - `src/segretario/connectors/gmail_client.py`: Gmail archive and trash calls.
 - `src/segretario/agents/mail_agent.py`: route `mail.archive` and `mail.delete`.
 - `src/segretario/cli.py`: persist executable Google payloads and route commands.
-- `tests/test_task_execution_phase14.py`: approved archive/delete task execution.
+- `tests/test_task_execution_task_run_hardening.py`: approved archive/delete task execution.
 
 ## Tasks
 

@@ -1,4 +1,4 @@
-# Task Run Approved Phase 14 Implementation Plan
+# Task Run Approved Task Run Hardening Implementation Plan
 
 **Goal:** Make approved queued tasks executable instead of leaving them as inert `queued` rows.
 
@@ -11,7 +11,7 @@
 - `src/segretario/agents/mail_agent.py`: execute approved `mail.send`.
 - `src/segretario/tools/gmail_tool.py`: local and Google draft-send interface.
 - `src/segretario/connectors/gmail_client.py`: Gmail draft send call.
-- `tests/test_task_execution_phase14.py`: approved send and waiting-confirmation guard.
+- `tests/test_task_execution_task_run_hardening.py`: approved send and waiting-confirmation guard.
 
 ## Tasks
 

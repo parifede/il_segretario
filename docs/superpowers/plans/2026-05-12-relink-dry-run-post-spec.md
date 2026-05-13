@@ -1,4 +1,4 @@
-# Relink Dry-Run Phase 8 Implementation Plan
+# Relink Dry-Run Post-Spec Relink Hardening Implementation Plan
 
 **Goal:** Add the MVP `relink --dry-run` command from the spec so the Segretario can inspect the Obsidian graph and propose missing wikilinks without editing pages.
 
@@ -9,7 +9,7 @@
 - `src/segretario/vault/relink.py`: dry-run graph analyzer and report renderer.
 - `src/segretario/agents/maintenance_agent.py`: maintenance action wrapper for `relink.dry_run`.
 - `src/segretario/cli.py`: `uv run segretario relink --dry-run`.
-- `tests/test_relink_phase8.py`: dry-run, skip path, ambiguity, and CLI routing tests.
+- `tests/test_relink_post_spec_relink.py`: dry-run, skip path, ambiguity, and CLI routing tests.
 
 ## Tasks
 

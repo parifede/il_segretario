@@ -77,7 +77,7 @@ def test_deny_cli_moves_confirmation_task_to_denied_and_audits(
     runner.invoke(app, ["calendar", "delete", "event_test"])
     task_id = _latest_task_id(tmp_path)
 
-    result = runner.invoke(app, ["deny", str(task_id), "--reason", "phase9 real test"])
+    result = runner.invoke(app, ["deny", str(task_id), "--reason", "taskboard hardening real test"])
 
     assert result.exit_code == 0
     assert f"denied: {task_id}" in result.output
@@ -86,7 +86,7 @@ def test_deny_cli_moves_confirmation_task_to_denied_and_audits(
 
     listed = runner.invoke(app, ["tasks", "--limit", "1"])
 
-    assert "phase9 real test" in listed.output
+    assert "taskboard hardening real test" in listed.output
     assert "calendar.delete requires confirmation" not in listed.output
 
 

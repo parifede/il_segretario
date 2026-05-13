@@ -1,11 +1,11 @@
-# Audit Verify CLI Phase 11 Implementation Plan
+# Audit Verify CLI Audit Verify CLI Hardening Implementation Plan
 
 **Goal:** Add a read-only `uv run segretario audit verify` command so audit integrity can be checked without Python snippets.
 
 ## File Structure
 
 - `src/segretario/cli.py`: audit subcommand.
-- `tests/test_audit_cli_phase11.py`: valid and tampered hash-chain CLI tests.
+- `tests/test_audit_cli_audit_verify_hardening.py`: valid and tampered hash-chain CLI tests.
 - `README.md`: command listing.
 
 ## Tasks
