@@ -972,7 +972,8 @@ def calendar_create(
 @calendar_app.command("modify")
 def calendar_modify(
     event_ref: str,
-    summary: str = typer.Option(..., "--summary", help="Updated event summary."),
+    summary_arg: str | None = typer.Argument(None, help="Updated event summary."),
+    summary: str | None = typer.Option(None, "--summary", help="Updated event summary."),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -982,13 +983,17 @@ def calendar_modify(
 ) -> None:
     """Create a confirmation task for calendar modification."""
     settings = load_settings(config_path=config)
+    summary_change = summary if summary is not None else summary_arg
+    if not summary_change:
+        typer.echo("calendar.modify requires a summary change")
+        raise typer.Exit(1)
     result = _build_core(settings).handle(
         TaskRequest(
             command="calendar.modify",
             payload={
                 **_google_payload(settings),
                 "event_ref": event_ref,
-                "summary": summary,
+                "summary": summary_change,
             },
             risk="high",
             action=PermissionKernel.CALENDAR_MODIFY,

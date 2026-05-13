@@ -28,6 +28,26 @@ def test_calendar_list_accepts_spec_date_options(tmp_path: Path, monkeypatch):
     assert "2026-05-13 dentist" in ranged.output
 
 
+def test_calendar_modify_accepts_summary_argument_and_requires_change(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path, scheduler_enabled=False)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    create = runner.invoke(app, ["calendar", "create", "Original event"])
+    event_id = create.output.strip().split("event: ", 1)[1]
+
+    missing_change = runner.invoke(app, ["calendar", "modify", event_id])
+    modify = runner.invoke(app, ["calendar", "modify", event_id, "Updated from arg"])
+
+    assert missing_change.exit_code == 1
+    assert "calendar.modify requires a summary change" in missing_change.output
+    assert modify.exit_code == 1
+    assert "calendar.modify requires confirmation" in modify.output
+    assert _latest_task_id(tmp_path) == 2
+
+
 def test_mail_draft_accepts_spec_prompt_argument_with_explicit_fields(
     tmp_path: Path,
     monkeypatch,
