@@ -310,6 +310,8 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     send = CliRunner().invoke(app, ["mail", "send", "draft_123"])
     listing = CliRunner().invoke(app, ["calendar", "list"])
     create = CliRunner().invoke(app, ["calendar", "create", "Dentist tomorrow 15:00"])
+    event_ref = create.output.split("event:", 1)[1].strip()
+    read_event = CliRunner().invoke(app, ["calendar", "read", event_ref])
     create_with_attendee = CliRunner().invoke(
         app,
         ["calendar", "create", "Meeting tomorrow", "--attendee", "person@example.com"],
@@ -330,6 +332,8 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert "No events found." in listing.output
     assert create.exit_code == 0
     assert "event:" in create.output
+    assert read_event.exit_code == 0
+    assert "Dentist tomorrow 15:00" in read_event.output
     assert create_with_attendee.exit_code == 1
     assert "calendar.create_with_attendees requires confirmation" in create_with_attendee.output
     assert modify.exit_code == 1
@@ -346,11 +350,48 @@ def test_mail_and_calendar_cli_route_through_core_and_confirmation_gates(
     assert ("mail.draft", "completed", "low") in rows
     assert ("mail.send", "waiting_confirmation", "high") in rows
     assert ("calendar.list", "completed", "low") in rows
+    assert ("calendar.read", "completed", "low") in rows
     assert ("calendar.create", "completed", "low") in rows
     assert ("calendar.create", "waiting_confirmation", "high") in rows
     assert ("calendar.modify", "waiting_confirmation", "high") in rows
     assert ("calendar.delete", "waiting_confirmation", "high") in rows
     assert (tmp_path / "state" / "audit" / "events.jsonl").exists()
+
+
+def test_google_disabled_forces_local_calendar_even_when_token_files_exist(
+    tmp_path: Path,
+    monkeypatch,
+):
+    vault = tmp_path / "vault"
+    credentials = tmp_path / "secrets" / "google" / "credentials.json"
+    token = tmp_path / "secrets" / "google" / "token.json"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text("{}", encoding="utf-8")
+    token.write_text("{}", encoding="utf-8")
+    config = tmp_path / "segretario.yaml"
+    config.write_text(
+        f"""
+project_name: il_segretario
+vault:
+  path: "{vault.as_posix()}"
+taskboard:
+  sqlite_path: "{(tmp_path / 'state' / 'taskboard.sqlite').as_posix()}"
+audit:
+  events_path: "{(tmp_path / 'state' / 'audit' / 'events.jsonl').as_posix()}"
+  hash_chain_path: "{(tmp_path / 'state' / 'audit' / 'hash_chain.jsonl').as_posix()}"
+google:
+  enabled: false
+  credentials_path: "{credentials.as_posix()}"
+  token_path: "{token.as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    created = CliRunner().invoke(app, ["calendar", "create", "Local disabled google"])
+
+    assert created.exit_code == 0
+    assert "event:" in created.output
 
 
 def _write_config(tmp_path: Path, vault: Path) -> Path:

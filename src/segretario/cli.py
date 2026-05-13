@@ -978,6 +978,33 @@ def calendar_list(
         typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
 
 
+@calendar_app.command("read")
+def calendar_read(
+    event_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Read local calendar event details."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.read",
+            payload={**_google_payload(settings), "event_ref": event_ref},
+            risk="low",
+            action=PermissionKernel.CALENDAR_READ,
+        )
+    )
+    if not result.ok:
+        typer.echo(result.message)
+        raise typer.Exit(1)
+    event = result.output
+    typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
+
+
 @calendar_app.command("create")
 def calendar_create(
     summary: str,
@@ -1235,6 +1262,7 @@ def _build_core(settings) -> SegretarioCore:
                 "mail.archive": MailAgent(),
                 "mail.delete": MailAgent(),
                 "calendar.list": CalendarAgent(),
+                "calendar.read": CalendarAgent(),
                 "calendar.create": CalendarAgent(),
                 "calendar.modify": CalendarAgent(),
                 "calendar.delete": CalendarAgent(),
@@ -1254,7 +1282,8 @@ def _google_payload(settings) -> dict[str, object]:
         "credentials_path": settings.google.credentials_path,
         "token_path": settings.google.token_path,
         "use_google": (
-            settings.google.credentials_path.exists()
+            settings.google.enabled
+            and settings.google.credentials_path.exists()
             and settings.google.token_path.exists()
         ),
     }
