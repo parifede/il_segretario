@@ -113,7 +113,6 @@ def test_task_cancel_cli_cancels_non_terminal_task_and_audits(
     runner = CliRunner()
     runner.invoke(app, ["mail", "send", "draft_test"])
     task_id = _latest_task_id(tmp_path)
-    runner.invoke(app, ["approve", str(task_id)])
 
     result = runner.invoke(
         app,
@@ -128,6 +127,7 @@ def test_task_cancel_cli_cancels_non_terminal_task_and_audits(
     listed = runner.invoke(app, ["tasks", "--limit", "1"])
 
     assert "stale test task" in listed.output
+    assert "gmail.send requires confirmation" not in listed.output
 
 
 def _write_config(tmp_path: Path) -> Path:

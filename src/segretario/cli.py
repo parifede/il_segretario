@@ -282,7 +282,7 @@ def tasks(
         typer.echo("No tasks found.")
         return
     for task in rows:
-        if task["status"] in {"denied", "failed"}:
+        if task["status"] in {"denied", "failed", "cancelled"}:
             reason = task.get("last_error") or task.get("confirmation_reason") or ""
         else:
             reason = task.get("confirmation_reason") or task.get("last_error") or ""
