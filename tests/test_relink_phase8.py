@@ -118,7 +118,7 @@ def test_relink_apply_respects_source_scope(tmp_path: Path):
     assert "[[Beta]]" not in alpha.read_text(encoding="utf-8")
 
 
-def test_relink_apply_updates_only_unambiguous_knowledge_links(tmp_path: Path):
+def test_relink_apply_updates_unambiguous_allowed_scope_links(tmp_path: Path):
     vault = tmp_path / "vault"
     alpha = vault / "knowledge" / "alpha.md"
     beta = vault / "knowledge" / "beta.md"
@@ -134,9 +134,25 @@ def test_relink_apply_updates_only_unambiguous_knowledge_links(tmp_path: Path):
     assert report.path == "output/relink-apply-2026-05-12.md"
     assert "knowledge/alpha.md -> [[Beta]]" in report.suggestions
     assert "knowledge/beta.md -> [[Alpha]]" in report.suggestions
+    assert "output/daily-digest.md -> [[Alpha]]" in report.suggestions
     assert "Beta is related" not in alpha.read_text(encoding="utf-8")
     assert "[[Beta]] is related" in alpha.read_text(encoding="utf-8")
-    assert "[[Alpha]] appears here" not in output.read_text(encoding="utf-8")
+    assert "[[Alpha]] appears here" in output.read_text(encoding="utf-8")
+
+
+def test_relink_apply_respects_output_scope(tmp_path: Path):
+    vault = tmp_path / "vault"
+    log = vault / "meta" / "log.md"
+    digest = vault / "output" / "daily-digest.md"
+    log.parent.mkdir(parents=True)
+    digest.parent.mkdir(parents=True)
+    log.write_text("# Log\n\nEntries.\n", encoding="utf-8")
+    digest.write_text("# Daily Digest\n\nRecent Log entries.\n", encoding="utf-8")
+
+    report = relink_apply(vault, source_scope="output", today=date(2026, 5, 12))
+
+    assert report.suggestions == ["output/daily-digest.md -> [[Log]]"]
+    assert "Recent [[Log]] entries." in digest.read_text(encoding="utf-8")
 
 
 def test_relink_apply_cli_routes_through_core_and_writes_pages(

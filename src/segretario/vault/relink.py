@@ -65,8 +65,6 @@ def relink_apply(
     applied: list[str] = []
 
     for suggestion in _find_suggestions(vault, source_scope=source_scope):
-        if not suggestion.source_path.startswith("knowledge/"):
-            continue
         source_path = vault / suggestion.source_path
         text = source_path.read_text(encoding="utf-8", errors="replace")
         metadata, body = parse_frontmatter(text)
