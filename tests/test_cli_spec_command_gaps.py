@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 import sqlite3
 
@@ -13,19 +14,22 @@ def test_calendar_list_accepts_spec_date_options(tmp_path: Path, monkeypatch):
     config = _write_config(tmp_path, scheduler_enabled=False)
     monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
     runner = CliRunner()
-    create = runner.invoke(app, ["calendar", "create", "2026-05-13 dentist"])
+    today_date = date.today()
+    tomorrow = today_date + timedelta(days=1)
+    summary = f"{today_date.isoformat()} dentist"
+    create = runner.invoke(app, ["calendar", "create", summary])
     assert create.exit_code == 0
 
     today = runner.invoke(app, ["calendar", "list", "--today"])
     ranged = runner.invoke(
         app,
-        ["calendar", "list", "--from", "2026-05-13", "--to", "2026-05-14"],
+        ["calendar", "list", "--from", today_date.isoformat(), "--to", tomorrow.isoformat()],
     )
 
     assert today.exit_code == 0
-    assert "2026-05-13 dentist" in today.output
+    assert summary in today.output
     assert ranged.exit_code == 0
-    assert "2026-05-13 dentist" in ranged.output
+    assert summary in ranged.output
 
 
 def test_calendar_modify_accepts_summary_argument_and_requires_change(
