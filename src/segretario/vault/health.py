@@ -6,6 +6,7 @@ from datetime import date
 import re
 from pathlib import Path
 
+from segretario.vault.frontmatter import parse_frontmatter
 from segretario.vault.paths import classify_vault_path
 
 
@@ -55,6 +56,9 @@ def lint_vault(vault_path: Path | str, *, today: date | None = None) -> LintRepo
         index_text = index_path.read_text(encoding="utf-8")
         issues.extend(_duplicate_heading_issues(index_text))
         issues.extend(_orphan_knowledge_issues(vault, index_text))
+    issues.extend(_stale_stub_issues(vault, report_date))
+    issues.extend(_unprocessed_raw_issues(vault))
+    issues.extend(_personal_knowledge_issues(vault))
 
     relative_report = f"output/lint-{report_date.isoformat()}.md"
     report_path = vault / relative_report
@@ -88,6 +92,76 @@ def _orphan_knowledge_issues(vault: Path, index_text: str) -> list[str]:
         if title not in linked_titles:
             issues.append(f"{relative}: orphan knowledge page")
     return issues
+
+
+def _stale_stub_issues(vault: Path, report_date: date) -> list[str]:
+    issues: list[str] = []
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return issues
+
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        relative = page.relative_to(vault).as_posix()
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, body = parse_frontmatter(text)
+        if str(metadata.get("status", "")).casefold() != "stub":
+            continue
+        updated = _parse_date(metadata.get("updated"))
+        if updated is None or (report_date - updated).days >= 7:
+            details = f" updated {updated.isoformat()}" if updated else ""
+            issues.append(f"{relative}: stale stub{details}")
+        elif "todo" in body.casefold():
+            issues.append(f"{relative}: stale stub")
+    return issues
+
+
+def _unprocessed_raw_issues(vault: Path) -> list[str]:
+    raw_dir = vault / "raw"
+    if not raw_dir.exists():
+        return []
+    issues: list[str] = []
+    for path in sorted(raw_dir.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
+            continue
+        relative = path.relative_to(vault).as_posix()
+        if classify_vault_path(relative).skip:
+            continue
+        issues.append(f"{relative}: unprocessed raw file")
+    return issues
+
+
+def _personal_knowledge_issues(vault: Path) -> list[str]:
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return []
+    issues: list[str] = []
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        relative = page.relative_to(vault).as_posix()
+        text = page.read_text(encoding="utf-8", errors="replace")
+        if _looks_personal(text):
+            issues.append(f"{relative}: personal-looking content in knowledge")
+    return issues
+
+
+def _parse_date(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _looks_personal(text: str) -> bool:
+    patterns = [
+        r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b",
+        r"\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b",
+        r"\bmy\s+(address|phone|password|ssn|social security)\b",
+    ]
+    lowered = text.casefold()
+    return any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in patterns)
 
 
 def _render_report(report_date: date, issues: list[str]) -> str:

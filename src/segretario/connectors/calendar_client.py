@@ -37,6 +37,14 @@ class CalendarClient:
         )
         return [_event_summary(event) for event in response.get("items", [])]
 
+    def get_event(self, *, event_ref: str) -> dict[str, object]:
+        event = (
+            self.service.events()
+            .get(calendarId="primary", eventId=event_ref)
+            .execute()
+        )
+        return _event_summary(event)
+
     def delete_event(self, *, event_ref: str) -> dict[str, object]:
         (
             self.service.events()

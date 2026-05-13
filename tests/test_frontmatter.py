@@ -25,6 +25,13 @@ def test_parse_frontmatter_without_header_returns_empty_metadata():
     assert body == "# Plain Note\n"
 
 
+def test_parse_frontmatter_strips_utf8_bom_before_header():
+    metadata, body = parse_frontmatter("\ufeff---\ntitle: BOM\n---\n# Body\n")
+
+    assert metadata == {"title": "BOM"}
+    assert body == "# Body\n"
+
+
 def test_render_frontmatter_round_trips_yaml_header():
     rendered = render_frontmatter(
         {"title": "Knowledge", "tags": ["vault"]},

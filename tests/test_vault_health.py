@@ -62,3 +62,35 @@ def test_lint_detects_duplicate_index_headings_and_orphan_knowledge_pages(tmp_pa
     assert "meta/index.md: duplicate heading 'Alpha'" in report.issues
     assert "knowledge/Orphan.md: orphan knowledge page" in report.issues
     assert "knowledge/Known.md: orphan knowledge page" not in report.issues
+
+
+def test_lint_detects_stale_stubs_unprocessed_raw_and_personal_knowledge(
+    tmp_path: Path,
+):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "knowledge").mkdir()
+    (vault / "raw" / "articles").mkdir(parents=True)
+    (vault / "raw" / "elaborati").mkdir(parents=True)
+    (vault / "meta" / "index.md").write_text(
+        "# Index\n\n## Knowledge\n- [[Stub]]\n- [[Personal]]\n",
+        encoding="utf-8",
+    )
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    (vault / "knowledge" / "Stub.md").write_text(
+        "---\nstatus: stub\nupdated: '2026-05-01'\n---\n# Stub\nTODO\n",
+        encoding="utf-8",
+    )
+    (vault / "knowledge" / "Personal.md").write_text(
+        "# Personal\n\nMy email is person@example.com\n",
+        encoding="utf-8",
+    )
+    (vault / "raw" / "articles" / "fresh.md").write_text("# Fresh\n", encoding="utf-8")
+    (vault / "raw" / "elaborati" / "old.md").write_text("# Old\n", encoding="utf-8")
+
+    report = lint_vault(vault, today=date(2026, 5, 14))
+
+    assert "knowledge/Stub.md: stale stub updated 2026-05-01" in report.issues
+    assert "raw/articles/fresh.md: unprocessed raw file" in report.issues
+    assert "raw/elaborati/old.md" not in "\n".join(report.issues)
+    assert "knowledge/Personal.md: personal-looking content in knowledge" in report.issues

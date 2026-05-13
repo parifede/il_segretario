@@ -11,6 +11,9 @@ class CalendarClientProtocol(Protocol):
     def list_events(self, *, max_results: int = 10) -> list[dict[str, object]]:
         """List calendar events through a configured client."""
 
+    def get_event(self, *, event_ref: str) -> dict[str, object]:
+        """Read one calendar event through a configured client."""
+
     def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
         """Update a calendar event through a configured client."""
 
@@ -34,6 +37,15 @@ class CalendarTool:
         if self.calendar_client is not None:
             return [*self.calendar_client.list_events(), *local_events]
         return local_events
+
+    def get_event(self, *, event_ref: str) -> dict[str, object]:
+        events = _read_events(self.events_path)
+        for event in events:
+            if str(event.get("id", "")) == event_ref:
+                return event
+        if self.calendar_client is not None:
+            return self.calendar_client.get_event(event_ref=event_ref)
+        raise ValueError(f"unknown calendar event: {event_ref}")
 
     def create_event(
         self,

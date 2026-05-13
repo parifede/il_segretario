@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from segretario.vault.frontmatter import parse_frontmatter, render_frontmatter
 from segretario.vault.index_log import KNOWLEDGE_HEADING, append_log, ensure_meta_index
 from segretario.agents.base import BaseAgent
 
@@ -66,11 +67,15 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
         "cloud_ok": False,
         "updated": date.today().isoformat(),
     }
+    key_points = _extract_key_points(body)
+    if key_points:
+        frontmatter["key_points"] = key_points
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_render_knowledge_page(frontmatter, title, body), encoding="utf-8")
     _update_index(vault, title)
     _append_log(vault, relative_source, target_relative)
+    _add_inbound_links(vault, title, target_relative)
 
     return IngestResult(path=target_relative, title=title, updated=updated)
 
@@ -139,6 +144,36 @@ def _convert_markdown_links_to_wikilinks(text: str) -> str:
         return f"[[{target or label}]]"
 
     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, text)
+
+
+def _extract_key_points(body: str) -> list[str]:
+    points: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip().strip("-* ")
+        if not line or line.startswith("#") or line.startswith("[["):
+            continue
+        sentence = re.split(r"(?<=[.!?])\s+", line, maxsplit=1)[0].strip()
+        if sentence and sentence not in points:
+            points.append(sentence)
+        if len(points) == 3:
+            break
+    return points
+
+
+def _add_inbound_links(vault: Path, title: str, target_relative: str) -> None:
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return
+    pattern = rf"(?<!\[\[)\b{re.escape(title)}\b(?!\]\])"
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        relative = page.relative_to(vault).as_posix()
+        if relative == target_relative:
+            continue
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, body = parse_frontmatter(text)
+        updated_body = re.sub(pattern, f"[[{title}]]", body, count=1, flags=re.IGNORECASE)
+        if updated_body != body:
+            page.write_text(render_frontmatter(metadata, updated_body), encoding="utf-8")
 
 
 def _render_knowledge_page(frontmatter: dict[str, object], title: str, body: str) -> str:

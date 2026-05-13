@@ -50,6 +50,13 @@ class FakeCalendarClient:
             }
         ]
 
+    def get_event(self, *, event_ref: str) -> dict[str, object]:
+        return {
+            "id": event_ref,
+            "summary": "Real Calendar Event",
+            "when": "2026-05-19T07:00:00Z",
+        }
+
     def update_event(self, *, event_ref: str, summary: str) -> dict[str, object]:
         event = {"id": event_ref, "summary": summary, "when": "2026-05-19T07:00:00Z"}
         self.updated_events.append(event)
@@ -211,10 +218,12 @@ def test_calendar_tool_lists_and_creates_local_events(tmp_path: Path):
     tool = CalendarTool(state_dir=tmp_path / "state" / "google")
 
     created = tool.create_event(summary="Dentist", when="tomorrow 15:00")
+    read = tool.get_event(event_ref=str(created["id"]))
     updated = tool.update_event(event_ref=str(created["id"]), summary="Updated dentist")
     events = tool.list_events()
 
     assert created["id"].startswith("event_")
+    assert read["summary"] == "Dentist"
     assert updated["id"] == created["id"]
     assert events[0]["summary"] == "Updated dentist"
     assert events[0]["when"] == "tomorrow 15:00"

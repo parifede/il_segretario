@@ -7,7 +7,13 @@ from segretario.tools.calendar_tool import CalendarTool
 
 class CalendarAgent(BaseAgent):
     allowed_actions = frozenset(
-        {"calendar.list", "calendar.create", "calendar.modify", "calendar.delete"}
+        {
+            "calendar.list",
+            "calendar.read",
+            "calendar.create",
+            "calendar.modify",
+            "calendar.delete",
+        }
     )
     allowed_tools = frozenset({"CalendarTool"})
 
@@ -21,6 +27,9 @@ class CalendarAgent(BaseAgent):
 
         if action == "calendar.list":
             return tool.list_events()
+
+        if action == "calendar.read":
+            return tool.get_event(event_ref=str(payload["event_ref"]))
 
         if action == "calendar.create":
             return tool.create_event(

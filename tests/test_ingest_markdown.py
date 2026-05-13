@@ -27,6 +27,37 @@ def test_ingest_markdown_creates_knowledge_page_index_and_log(tmp_path: Path):
     ).read_text(encoding="utf-8")
 
 
+def test_ingest_extracts_key_points_into_frontmatter(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "# Source Topic\n\nFirst important point.\n\nSecond important point.\n",
+        encoding="utf-8",
+    )
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    written = (vault / "knowledge" / "source-topic.md").read_text(encoding="utf-8")
+    assert "key_points:\n" in written
+    assert "- First important point." in written
+    assert "- Second important point." in written
+
+
+def test_ingest_adds_inbound_wikilink_from_related_knowledge_page(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    related = vault / "knowledge" / "related.md"
+    source.parent.mkdir(parents=True)
+    related.parent.mkdir(parents=True)
+    source.write_text("# Source Topic\n\nAlpha beta topic.\n", encoding="utf-8")
+    related.write_text("# Related\n\nThis page mentions Source Topic plainly.\n", encoding="utf-8")
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    assert "[[Source Topic]]" in related.read_text(encoding="utf-8")
+
+
 def test_ingest_does_not_modify_raw_source(tmp_path: Path):
     vault = tmp_path / "vault"
     source = vault / "raw" / "articles" / "source.md"

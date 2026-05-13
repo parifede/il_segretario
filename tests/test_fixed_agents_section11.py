@@ -27,7 +27,13 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
             {"GmailTool"},
         ),
         CalendarAgent: (
-            {"calendar.list", "calendar.create", "calendar.modify", "calendar.delete"},
+            {
+                "calendar.list",
+                "calendar.read",
+                "calendar.create",
+                "calendar.modify",
+                "calendar.delete",
+            },
             {"CalendarTool"},
         ),
         MaintenanceAgent: (

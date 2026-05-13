@@ -6,6 +6,7 @@ import yaml
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    text = text.lstrip("\ufeff")
     if not text.startswith("---\n"):
         return {}, text
 
