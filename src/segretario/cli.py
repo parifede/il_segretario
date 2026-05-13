@@ -23,6 +23,7 @@ from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
 from segretario.connectors.google_oauth import GoogleOAuthConnector
 from segretario.policies.permissions import PermissionKernel
+from segretario.policies.privacy import project_private_context
 from segretario.scheduler.jobs import run_scheduler_once
 from segretario.taskboard import TaskboardStore
 from segretario.taskboard import TaskStatus
@@ -38,6 +39,7 @@ calendar_app = typer.Typer(help="Calendar commands.")
 google_app = typer.Typer(help="Google OAuth commands.")
 scheduler_app = typer.Typer(help="Scheduler commands.")
 external_app = typer.Typer(help="External-agent answer commands.")
+privacy_app = typer.Typer(help="Privacy projection commands.")
 audit_app = typer.Typer(help="Audit commands.")
 task_app = typer.Typer(help="Single task commands.")
 app.add_typer(config_app, name="config")
@@ -48,6 +50,7 @@ app.add_typer(calendar_app, name="calendar")
 app.add_typer(google_app, name="google")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(external_app, name="external")
+app.add_typer(privacy_app, name="privacy")
 app.add_typer(audit_app, name="audit")
 app.add_typer(task_app, name="task")
 
@@ -528,6 +531,13 @@ def audit_verify(
         return
     typer.echo("Audit verify: failed")
     raise typer.Exit(1)
+
+
+@privacy_app.command("project")
+def privacy_project(text: str) -> None:
+    """Project private context into privacy-safe tokens and bands."""
+    projection = project_private_context(text)
+    typer.echo(projection.text)
 
 
 @lint_app.command("wiki")

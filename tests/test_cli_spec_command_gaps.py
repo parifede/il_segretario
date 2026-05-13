@@ -149,6 +149,24 @@ def test_watch_cli_executes_bounded_raw_watch(tmp_path: Path, monkeypatch):
     assert _audit(tmp_path).verify() is True
 
 
+def test_privacy_project_cli_outputs_projection_without_raw_sensitive_values():
+    result = CliRunner().invoke(
+        app,
+        [
+            "privacy",
+            "project",
+            "Mario Rossi email mario.rossi@example.com telefono +39 333 123 4567",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "PERSON_TOKEN_A" in result.output
+    assert "EMAIL_TOKEN_A" in result.output
+    assert "PHONE_TOKEN_A" in result.output
+    assert "Mario Rossi" not in result.output
+    assert "mario.rossi@example.com" not in result.output
+
+
 def _write_config(tmp_path: Path, *, scheduler_enabled: bool) -> Path:
     vault = tmp_path / "vault"
     (vault / "meta").mkdir(parents=True)
