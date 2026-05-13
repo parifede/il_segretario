@@ -1,4 +1,8 @@
-from segretario.policies.permissions import PermissionDecision, PermissionKernel
+from segretario.policies.permissions import (
+    PermissionDecision,
+    PermissionKernel,
+    RiskClassifier,
+)
 from segretario.policies.privacy import (
     KnowledgeExportDecision,
     WebQueryDecision,
@@ -10,6 +14,7 @@ __all__ = [
     "KnowledgeExportDecision",
     "PermissionDecision",
     "PermissionKernel",
+    "RiskClassifier",
     "WebQueryDecision",
     "knowledge_export_decision",
     "web_query_decision",

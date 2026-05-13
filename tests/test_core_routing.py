@@ -79,6 +79,35 @@ def test_core_confirmation_required_task_does_not_dispatch(tmp_path: Path):
     assert agent.requests == []
     task = taskboard.get_task(result.task_id)
     assert task["status"] == TaskStatus.WAITING_CONFIRMATION.value
+    assert task["risk"] == "high"
+    assert audit.verify() is True
+
+
+def test_core_classifies_risk_from_action_even_if_request_is_too_low(tmp_path: Path):
+    taskboard = TaskboardStore(tmp_path / "taskboard.sqlite")
+    taskboard.initialize()
+    audit = AuditLog(tmp_path / "audit")
+    agent = RecordingAgent()
+    core = SegretarioCore(
+        taskboard=taskboard,
+        audit=audit,
+        router=TaskRouter({"mail.send": agent}),
+    )
+
+    result = core.handle(
+        TaskRequest(
+            command="mail.send",
+            payload={"draft_id": "draft-test"},
+            risk="low",
+            action="gmail.send",
+        )
+    )
+
+    assert result.ok is False
+    assert agent.requests == []
+    task = taskboard.get_task(result.task_id)
+    assert task["status"] == TaskStatus.WAITING_CONFIRMATION.value
+    assert task["risk"] == "high"
     assert audit.verify() is True
 
 

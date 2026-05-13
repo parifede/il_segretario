@@ -7,7 +7,11 @@ from typing import Any
 from segretario.app.models import CoreResult, TaskRequest
 from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
-from segretario.policies.permissions import PermissionDecision, PermissionKernel
+from segretario.policies.permissions import (
+    PermissionDecision,
+    PermissionKernel,
+    RiskClassifier,
+)
 from segretario.taskboard.payloads import TaskPayloadStore
 from segretario.taskboard import TaskboardStore
 
@@ -27,11 +31,12 @@ class SegretarioCore:
     def handle(self, request: TaskRequest) -> CoreResult:
         action = request.action or request.command
         decision = PermissionKernel.decision_for(action)
+        risk = RiskClassifier.risk_for(action, requested_risk=request.risk)
         task = self.taskboard.create_task(
             source=request.source,
             requested_by=request.requested_by,
             command=request.command,
-            risk=request.risk,
+            risk=risk,
             requires_confirmation=decision
             in {PermissionDecision.CONFIRM, PermissionDecision.PROJECT},
             confirmation_reason=_confirmation_reason(decision, action),
