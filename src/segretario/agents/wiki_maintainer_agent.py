@@ -8,9 +8,12 @@ from segretario.vault.index_log import append_log, ensure_meta_index
 
 
 class WikiMaintainerAgent(BaseAgent):
+    allowed_actions = frozenset({"meta.index.ensure", "meta.log.append"})
+    allowed_tools = frozenset({"MarkdownTool", "VaultTool"})
+
     def run(self, request: object) -> dict[str, Any]:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
         vault_path = self.require_vault_path(payload)
 
         if action == "meta.index.ensure":

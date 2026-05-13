@@ -10,9 +10,14 @@ from segretario.vault.paths import classify_vault_path
 
 
 class SecurityAgent(BaseAgent):
+    allowed_actions = frozenset(
+        {"classify_path", "security.path", "knowledge.export", "web.query", "external.answer"}
+    )
+    allowed_tools = frozenset({"SecurityPolicy", "OutputGuard"})
+
     def run(self, request: object) -> dict[str, Any]:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
 
         if action in {"classify_path", "security.path"}:
             policy = classify_vault_path(

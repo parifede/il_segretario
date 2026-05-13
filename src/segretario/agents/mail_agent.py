@@ -6,9 +6,14 @@ from segretario.tools.gmail_tool import GmailTool
 
 
 class MailAgent(BaseAgent):
+    allowed_actions = frozenset(
+        {"mail.read", "mail.draft", "mail.send", "mail.archive", "mail.delete"}
+    )
+    allowed_tools = frozenset({"GmailTool"})
+
     def run(self, request: object) -> object:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
         tool = GmailTool(
             state_dir=payload["state_dir"],
             google_client=_gmail_client_from_payload(payload),

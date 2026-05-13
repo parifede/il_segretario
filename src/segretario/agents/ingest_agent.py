@@ -23,8 +23,12 @@ class IngestResult:
 
 
 class IngestAgent(BaseAgent):
+    allowed_actions = frozenset({"ingest"})
+    allowed_tools = frozenset({"MarkdownTool", "VaultTool"})
+
     def run(self, request: object) -> dict[str, object]:
         payload = self.payload(request)
+        self.require_allowed_action(self.command(request, payload))
         result = ingest_article(
             self.require_vault_path(payload),
             payload.get("source_path", payload.get("source")),

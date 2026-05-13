@@ -6,9 +6,14 @@ from segretario.tools.calendar_tool import CalendarTool
 
 
 class CalendarAgent(BaseAgent):
+    allowed_actions = frozenset(
+        {"calendar.list", "calendar.create", "calendar.modify", "calendar.delete"}
+    )
+    allowed_tools = frozenset({"CalendarTool"})
+
     def run(self, request: object) -> object:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
         tool = CalendarTool(
             state_dir=payload["state_dir"],
             calendar_client=_calendar_client_from_payload(payload),

@@ -10,9 +10,12 @@ from segretario.vault.relink import relink_apply, relink_dry_run
 
 
 class MaintenanceAgent(BaseAgent):
+    allowed_actions = frozenset({"stats", "lint.wiki", "relink.dry_run", "relink.apply"})
+    allowed_tools = frozenset({"MarkdownTool", "SearchTool", "VaultTool"})
+
     def run(self, request: object) -> dict[str, Any]:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
 
         if action == "stats":
             return asdict(vault_stats(self.require_vault_path(payload)))

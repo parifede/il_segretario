@@ -15,8 +15,12 @@ class SearchMatches(list[dict[str, Any]]):
 
 
 class SearchAgent(BaseAgent):
+    allowed_actions = frozenset({"search"})
+    allowed_tools = frozenset({"SearchTool"})
+
     def run(self, request: object) -> SearchMatches:
         payload = self.payload(request)
+        self.require_allowed_action(self.command(request, payload))
         results = search_vault(
             self.require_vault_path(payload),
             str(payload["query"]),

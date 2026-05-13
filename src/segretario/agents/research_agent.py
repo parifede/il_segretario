@@ -6,9 +6,12 @@ from segretario.tools.web_tool import fetch_link
 
 
 class ResearchAgent(BaseAgent):
+    allowed_actions = frozenset({"link", "web.query"})
+    allowed_tools = frozenset({"WebTool"})
+
     def run(self, request: object) -> dict[str, object]:
         payload = self.payload(request)
-        action = self.command(request, payload)
+        action = self.require_allowed_action(self.command(request, payload))
 
         if action == "web.query":
             return WebConnector().prepare_query(

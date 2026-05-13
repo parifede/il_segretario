@@ -14,6 +14,9 @@ class AgentPayloadError(ValueError):
 class BaseAgent:
     """Base class for fixed operation wrappers."""
 
+    allowed_actions: frozenset[str] = frozenset()
+    allowed_tools: frozenset[str] = frozenset()
+
     def __init__(self, vault_path: object | None = None) -> None:
         self.vault_path = vault_path
 
@@ -34,6 +37,13 @@ class BaseAgent:
 
         request_command = getattr(request, "command", None)
         return str(request_command) if request_command is not None else None
+
+    def require_allowed_action(self, action: str | None) -> str:
+        if action is None:
+            raise AgentPayloadError(f"{type(self).__name__} requires an action")
+        if self.allowed_actions and action not in self.allowed_actions:
+            raise ValueError(f"{type(self).__name__} cannot handle action: {action}")
+        return action
 
     def require_vault_path(self, payload: Payload) -> object:
         vault_path = payload.get("vault_path", self.vault_path)
