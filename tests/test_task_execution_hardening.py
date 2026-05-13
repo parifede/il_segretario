@@ -107,6 +107,47 @@ def test_approved_mail_archive_task_can_be_run_from_stored_payload(
     assert _audit(tmp_path).verify() is True
 
 
+def test_agents_run_once_executes_approved_mail_archive_task(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["mail", "archive", "msg_archive_agent_1"])
+    task_id = _latest_task_id(tmp_path)
+    runner.invoke(app, ["approve", str(task_id)])
+
+    run = runner.invoke(app, ["agents", "run-once"])
+
+    assert run.exit_code == 0
+    assert f"{task_id}: mail.archive completed" in run.output
+    assert _task_status(tmp_path, task_id) == "completed"
+    assert _task_output_ref(tmp_path, task_id).startswith("archived_")
+    assert "msg_archive_agent_1" in (
+        tmp_path / "state" / "google" / "gmail_archived.jsonl"
+    ).read_text(encoding="utf-8")
+    assert _audit(tmp_path).verify() is True
+
+
+def test_agents_run_once_ignores_waiting_confirmation_tasks(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["mail", "archive", "msg_archive_agent_waiting"])
+    task_id = _latest_task_id(tmp_path)
+
+    run = runner.invoke(app, ["agents", "run-once"])
+
+    assert run.exit_code == 0
+    assert "No runnable agent tasks." in run.output
+    assert _task_status(tmp_path, task_id) == "waiting_confirmation"
+    assert _audit(tmp_path).verify() is True
+
+
 def test_approved_mail_delete_task_can_be_run_from_stored_payload(
     tmp_path: Path,
     monkeypatch,

@@ -42,6 +42,7 @@ external_app = typer.Typer(help="External-agent answer commands.")
 privacy_app = typer.Typer(help="Privacy projection commands.")
 audit_app = typer.Typer(help="Audit commands.")
 task_app = typer.Typer(help="Single task commands.")
+agents_app = typer.Typer(help="Agent worker commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -53,6 +54,7 @@ app.add_typer(external_app, name="external")
 app.add_typer(privacy_app, name="privacy")
 app.add_typer(audit_app, name="audit")
 app.add_typer(task_app, name="task")
+app.add_typer(agents_app, name="agents")
 
 
 @app.command()
@@ -392,6 +394,28 @@ def task_cancel(
     typer.echo(f"cancelled: {task_id}")
 
 
+@agents_app.command("run-once")
+def agents_run_once(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Let an agent claim and execute one queued task."""
+    settings = load_settings(config_path=config)
+    result = _run_one_agent_task(settings)
+    if result is None:
+        typer.echo("No runnable agent tasks.")
+        return
+    task_id, command, status, output_ref = result
+    if output_ref:
+        typer.echo(f"{task_id}: {command} {status} -> {output_ref}")
+    else:
+        typer.echo(f"{task_id}: {command} {status}")
+
+
 def _run_queued_task(settings, task_id: int) -> None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -444,6 +468,59 @@ def _run_queued_task(settings, task_id: int) -> None:
         "task.completed",
         {"task_id": task_id, "command": request.command, "output": output_ref},
     )
+
+
+def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    command_map = _agent_command_map()
+    task = taskboard.acquire_lease_for_commands(
+        owner="agent-runner",
+        lease_seconds=max(settings.taskboard.lease_minutes, 1) * 60,
+        commands=set(command_map),
+    )
+    if task is None:
+        return None
+
+    task_id = int(task["id"])
+    command = str(task["command"])
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    try:
+        request = payload_store.load(str(task.get("input_ref") or ""))
+        audit.append_event(
+            "agent.task_started",
+            {"task_id": task_id, "command": request.command, "agent": "agent-runner"},
+        )
+        output = command_map[request.command].run(request)
+    except Exception as exc:
+        max_retries = (
+            1
+            if str(task.get("risk", "")).lower() in {"high", "critical"}
+            else settings.taskboard.max_retries
+        )
+        taskboard.record_failure(
+            task_id,
+            error=str(exc),
+            max_retries=max_retries,
+            cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
+        )
+        audit.append_event(
+            "agent.task_failed",
+            {"task_id": task_id, "command": command, "error": str(exc)},
+        )
+        return task_id, command, "failed", None
+
+    output_ref = _cli_output_ref(output)
+    taskboard.complete_task(task_id, output_ref=output_ref)
+    audit.append_event(
+        "agent.task_completed",
+        {"task_id": task_id, "command": request.command, "output": output_ref},
+    )
+    return task_id, request.command, "completed", output_ref
 
 
 @app.command()
@@ -1244,32 +1321,34 @@ def _build_core(settings) -> SegretarioCore:
             events_path=settings.audit.events_path,
             chain_path=settings.audit.hash_chain_path,
         ),
-        router=TaskRouter(
-            {
-                "search": SearchAgent(),
-                "stats": MaintenanceAgent(),
-                "lint.wiki": MaintenanceAgent(),
-                "relink.dry_run": MaintenanceAgent(),
-                "relink.apply": MaintenanceAgent(),
-                "ingest": IngestAgent(),
-                "link": ResearchAgent(),
-                "web": ResearchAgent(),
-                "meta.index.ensure": WikiMaintainerAgent(),
-                "meta.log.append": WikiMaintainerAgent(),
-                "mail.read": MailAgent(),
-                "mail.draft": MailAgent(),
-                "mail.send": MailAgent(),
-                "mail.archive": MailAgent(),
-                "mail.delete": MailAgent(),
-                "calendar.list": CalendarAgent(),
-                "calendar.read": CalendarAgent(),
-                "calendar.create": CalendarAgent(),
-                "calendar.modify": CalendarAgent(),
-                "calendar.delete": CalendarAgent(),
-                "external.answer": SecurityAgent(),
-            }
-        ),
+        router=TaskRouter(_agent_command_map()),
     )
+
+
+def _agent_command_map():
+    return {
+        "search": SearchAgent(),
+        "stats": MaintenanceAgent(),
+        "lint.wiki": MaintenanceAgent(),
+        "relink.dry_run": MaintenanceAgent(),
+        "relink.apply": MaintenanceAgent(),
+        "ingest": IngestAgent(),
+        "link": ResearchAgent(),
+        "web": ResearchAgent(),
+        "meta.index.ensure": WikiMaintainerAgent(),
+        "meta.log.append": WikiMaintainerAgent(),
+        "mail.read": MailAgent(),
+        "mail.draft": MailAgent(),
+        "mail.send": MailAgent(),
+        "mail.archive": MailAgent(),
+        "mail.delete": MailAgent(),
+        "calendar.list": CalendarAgent(),
+        "calendar.read": CalendarAgent(),
+        "calendar.create": CalendarAgent(),
+        "calendar.modify": CalendarAgent(),
+        "calendar.delete": CalendarAgent(),
+        "external.answer": SecurityAgent(),
+    }
 
 
 def _google_state_dir(settings) -> Path:
