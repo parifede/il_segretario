@@ -6,10 +6,8 @@ from pathlib import Path
 
 from segretario.audit import AuditLog
 from segretario.config.settings import Settings
-from segretario.connectors.gmail_client import GmailClient
 from segretario.policies.permissions import PermissionDecision, PermissionKernel
 from segretario.taskboard import TaskStatus, TaskboardStore
-from segretario.tools.gmail_tool import GmailTool
 from segretario.vault.health import lint_vault, vault_stats
 from segretario.vault.paths import classify_vault_path
 from segretario.vault.preflight import VaultPreflightReport, run_vault_preflight
@@ -48,6 +46,7 @@ def run_scheduler_once(
     taskboard: TaskboardStore,
     audit: AuditLog,
     execute: bool = False,
+    candidate_jobs: list[SchedulerJob] | None = None,
 ) -> SchedulerRunSummary:
     """Schedule one bounded maintenance pass; never runs an uncontrolled loop."""
 
@@ -91,7 +90,11 @@ def run_scheduler_once(
             preflight=preflight,
         )
 
-    for job in _candidate_jobs(settings):
+    max_tasks = max(settings.scheduler.max_tasks_per_cycle, 0)
+    jobs = candidate_jobs if candidate_jobs is not None else _candidate_jobs(settings)
+    for job in jobs:
+        if len(scheduled) >= max_tasks:
+            break
         decision = PermissionKernel.decision_for(job.action)
         if decision != PermissionDecision.ALLOW:
             skipped.append(f"{job.command}: permission {decision.value}")
@@ -150,9 +153,9 @@ def _candidate_jobs(settings: Settings) -> list[SchedulerJob]:
         jobs.append(
             SchedulerJob(
                 command="watch.inbox",
-                action=PermissionKernel.GMAIL_READ,
+                action=PermissionKernel.OUTPUT_WRITE,
                 risk="low",
-                reason="read inbox metadata for local triage",
+                reason="scan local inbox folder excluding configured skip paths",
             )
         )
     if settings.scheduler.daily_digest_enabled:
@@ -165,13 +168,40 @@ def _candidate_jobs(settings: Settings) -> list[SchedulerJob]:
             )
         )
     if settings.scheduler.maintenance_budget_minutes > 0:
-        jobs.append(
-            SchedulerJob(
-                command="maintenance.cycle",
-                action=PermissionKernel.OUTPUT_WRITE,
-                risk="low",
-                reason=f"bounded maintenance budget {settings.scheduler.maintenance_budget_minutes} minutes",
-            )
+        budget = settings.scheduler.maintenance_budget_minutes
+        jobs.extend(
+            [
+                SchedulerJob(
+                    command="weekly.lint",
+                    action=PermissionKernel.OUTPUT_WRITE,
+                    risk="low",
+                    reason=f"weekly lint within bounded maintenance budget {budget} minutes",
+                ),
+                SchedulerJob(
+                    command="periodic.stats",
+                    action=PermissionKernel.OUTPUT_WRITE,
+                    risk="low",
+                    reason=f"periodic stats within bounded maintenance budget {budget} minutes",
+                ),
+                SchedulerJob(
+                    command="bookmark.review",
+                    action=PermissionKernel.OUTPUT_WRITE,
+                    risk="low",
+                    reason=f"bookmark review within bounded maintenance budget {budget} minutes",
+                ),
+                SchedulerJob(
+                    command="stale_stub.review",
+                    action=PermissionKernel.OUTPUT_WRITE,
+                    risk="low",
+                    reason=f"stale stub review within bounded maintenance budget {budget} minutes",
+                ),
+                SchedulerJob(
+                    command="orphan_page.review",
+                    action=PermissionKernel.OUTPUT_WRITE,
+                    risk="low",
+                    reason=f"orphan page review within bounded maintenance budget {budget} minutes",
+                ),
+            ]
         )
     return jobs
 
@@ -183,7 +213,7 @@ def _execute_scheduled_tasks(
     audit: AuditLog,
 ) -> list[SchedulerExecutionResult]:
     lease_seconds = max(settings.taskboard.lease_minutes, 1) * 60
-    max_jobs = len(_candidate_jobs(settings))
+    max_jobs = max(settings.scheduler.max_tasks_per_cycle, 0)
     executed: list[SchedulerExecutionResult] = []
 
     for _ in range(max_jobs):
@@ -198,11 +228,11 @@ def _execute_scheduled_tasks(
         try:
             output_ref = _execute_command(command, settings)
         except Exception as exc:
-            taskboard.record_failure(
+            failed_task = taskboard.record_failure(
                 int(task["id"]),
                 error=str(exc),
                 max_retries=settings.taskboard.max_retries,
-                cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
+                cooldown_seconds=max(settings.scheduler.cooldown_minutes_after_failure, 0) * 60,
             )
             audit.append_event(
                 "scheduler.task_failed",
@@ -211,7 +241,7 @@ def _execute_scheduled_tasks(
             executed.append(
                 SchedulerExecutionResult(
                     command=command,
-                    status=TaskStatus.FAILED.value,
+                    status=str(failed_task["status"]),
                     error=str(exc),
                 )
             )
@@ -234,7 +264,17 @@ def _execute_scheduled_tasks(
 
 
 def _scheduler_commands() -> set[str]:
-    return {"watch.raw", "watch.inbox", "daily.digest", "maintenance.cycle"}
+    return {
+        "watch.raw",
+        "watch.inbox",
+        "daily.digest",
+        "weekly.lint",
+        "periodic.stats",
+        "bookmark.review",
+        "stale_stub.review",
+        "orphan_page.review",
+        "maintenance.cycle",
+    }
 
 
 def _execute_command(command: str, settings: Settings) -> str:
@@ -244,6 +284,28 @@ def _execute_command(command: str, settings: Settings) -> str:
         return _write_inbox_watch(settings)
     if command == "daily.digest":
         return _write_daily_digest(settings.vault.path)
+    if command == "weekly.lint":
+        return _write_weekly_lint(settings.vault.path)
+    if command == "periodic.stats":
+        return _write_periodic_stats(settings.vault.path)
+    if command == "bookmark.review":
+        return _write_bookmark_review(settings.vault.path)
+    if command == "stale_stub.review":
+        return _write_filtered_lint_review(
+            settings.vault.path,
+            relative_report="output/stale-stub-review.md",
+            title="Stale Stub Review",
+            needle="stale stub",
+            empty_message="no stale stubs found",
+        )
+    if command == "orphan_page.review":
+        return _write_filtered_lint_review(
+            settings.vault.path,
+            relative_report="output/orphan-page-review.md",
+            title="Orphan Page Review",
+            needle="orphan",
+            empty_message="no orphan pages found",
+        )
     if command == "maintenance.cycle":
         return _write_maintenance_cycle(settings.vault.path)
     raise ValueError(f"unsupported scheduler task: {command}")
@@ -277,22 +339,25 @@ def _write_raw_watch(vault_path: str | Path) -> str:
 
 def _write_inbox_watch(settings: Settings) -> str:
     vault = Path(settings.vault.path)
-    tool = GmailTool(
-        state_dir=settings.taskboard.sqlite_path.parent / "google",
-        google_client=_gmail_client(settings),
-    )
-    messages = tool.read(query="in:inbox newer_than:1d")
+    inbox_dir = vault / "inbox"
+    candidates: list[str] = []
+    if inbox_dir.exists():
+        for path in sorted(inbox_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(vault).as_posix()
+            if classify_vault_path(relative).skip:
+                continue
+            candidates.append(relative)
+
     relative_report = "output/inbox-watch.md"
     report_path = vault / relative_report
     report_path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# Inbox Watch", ""]
-    if messages:
-        for message in messages[:20]:
-            subject = str(message.get("subject", "")).replace("\n", " ")[:120]
-            message_id = str(message.get("id", ""))
-            lines.append(f"- {message_id}: {subject}")
+    if candidates:
+        lines.extend(f"- {item}" for item in candidates)
     else:
-        lines.append("- no inbox messages")
+        lines.append("- no local inbox files")
     lines.append("")
     report_path.write_text("\n".join(lines), encoding="utf-8")
     return relative_report
@@ -338,20 +403,83 @@ def _write_maintenance_cycle(vault_path: str | Path) -> str:
     return relative_report
 
 
+def _write_weekly_lint(vault_path: str | Path) -> str:
+    vault = Path(vault_path)
+    lint = lint_vault(vault)
+    relative_report = "output/weekly-lint.md"
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Weekly Lint", "", f"- lint_report: {lint.path}", f"- lint_issues: {len(lint.issues)}", ""]
+    if lint.issues:
+        lines.extend(f"- {issue}" for issue in lint.issues)
+    else:
+        lines.append("- no lint issues found")
+    lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return relative_report
+
+
+def _write_periodic_stats(vault_path: str | Path) -> str:
+    vault = Path(vault_path)
+    stats = vault_stats(vault)
+    relative_report = "output/periodic-stats.md"
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Periodic Stats",
+        "",
+        f"- total_markdown: {stats.total_markdown}",
+    ]
+    lines.extend(f"- {name}: {count}" for name, count in sorted(stats.markdown_by_area.items()))
+    lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return relative_report
+
+
+def _write_bookmark_review(vault_path: str | Path) -> str:
+    vault = Path(vault_path)
+    bookmarks = _tail_lines(vault / "meta" / "bookmarks.md", limit=50)
+    relative_report = "output/bookmark-review.md"
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Bookmark Review", ""]
+    if bookmarks:
+        lines.extend(f"- {line}" for line in bookmarks)
+    else:
+        lines.append("- no bookmarks file or entries found")
+    lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return relative_report
+
+
+def _write_filtered_lint_review(
+    vault_path: str | Path,
+    *,
+    relative_report: str,
+    title: str,
+    needle: str,
+    empty_message: str,
+) -> str:
+    vault = Path(vault_path)
+    lint = lint_vault(vault)
+    matches = [
+        issue
+        for issue in lint.issues
+        if needle.casefold() in issue.casefold()
+    ]
+    report_path = vault / relative_report
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"# {title}", ""]
+    if matches:
+        lines.extend(f"- {issue}" for issue in matches)
+    else:
+        lines.append(f"- {empty_message}")
+    lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return relative_report
+
+
 def _tail_lines(path: Path, *, limit: int) -> list[str]:
     if not path.exists():
         return []
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines()[-limit:] if line.strip()]
-
-
-def _gmail_client(settings: Settings):
-    if not (
-        settings.google.enabled
-        and settings.google.credentials_path.exists()
-        and settings.google.token_path.exists()
-    ):
-        return None
-    return GmailClient.from_token(
-        credentials_path=settings.google.credentials_path,
-        token_path=settings.google.token_path,
-    )

@@ -51,6 +51,7 @@ def test_scheduler_run_once_schedules_enabled_jobs_with_budget_and_audit(tmp_pat
             inbox_watcher_enabled=True,
             daily_digest_enabled=True,
             maintenance_budget_minutes=7,
+            max_tasks_per_cycle=5,
         ),
     )
 
@@ -63,7 +64,8 @@ def test_scheduler_run_once_schedules_enabled_jobs_with_budget_and_audit(tmp_pat
         "watch.raw",
         "watch.inbox",
         "daily.digest",
-        "maintenance.cycle",
+        "weekly.lint",
+        "periodic.stats",
     ]
     assert summary.skipped == []
     assert taskboard.acquire_lease(owner="phase6-test", lease_seconds=60)["command"] == "watch.raw"
@@ -87,6 +89,7 @@ def test_scheduler_run_once_execute_finishes_safe_jobs_and_writes_outputs(tmp_pa
             raw_watcher_enabled=True,
             daily_digest_enabled=True,
             maintenance_budget_minutes=7,
+            max_tasks_per_cycle=5,
         ),
     )
 
@@ -95,20 +98,25 @@ def test_scheduler_run_once_execute_finishes_safe_jobs_and_writes_outputs(tmp_pa
     assert [item.command for item in summary.executed] == [
         "watch.raw",
         "daily.digest",
-        "maintenance.cycle",
+        "weekly.lint",
+        "periodic.stats",
+        "bookmark.review",
     ]
     assert taskboard.acquire_lease(owner="phase6-test", lease_seconds=60) is None
     rows = _task_rows(tmp_path / "state" / "taskboard.sqlite")
     assert rows == [
         ("watch.raw", "completed"),
         ("daily.digest", "completed"),
-        ("maintenance.cycle", "completed"),
+        ("weekly.lint", "completed"),
+        ("periodic.stats", "completed"),
+        ("bookmark.review", "completed"),
     ]
     raw_report = (vault / "output" / "watch-raw.md").read_text(encoding="utf-8")
     assert "raw/articles/note.md" in raw_report
     assert "DO_NOT_SCAN" not in raw_report
     assert (vault / "output" / "daily-digest.md").exists()
-    assert (vault / "output" / "maintenance-cycle.md").exists()
+    assert (vault / "output" / "weekly-lint.md").exists()
+    assert (vault / "output" / "periodic-stats.md").exists()
     assert audit.verify() is True
 
 
@@ -135,15 +143,16 @@ def test_scheduler_execute_ignores_non_scheduler_queued_tasks(tmp_path: Path):
             raw_watcher_enabled=False,
             daily_digest_enabled=False,
             maintenance_budget_minutes=7,
+            max_tasks_per_cycle=1,
         ),
     )
 
     summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit, execute=True)
 
-    assert [item.command for item in summary.executed] == ["maintenance.cycle"]
+    assert [item.command for item in summary.executed] == ["weekly.lint"]
     rows = _task_rows(tmp_path / "state" / "taskboard.sqlite")
     assert ("mail.send", "queued") in rows
-    assert ("maintenance.cycle", "completed") in rows
+    assert ("weekly.lint", "completed") in rows
     assert audit.verify() is True
 
 
@@ -198,6 +207,7 @@ scheduler:
   raw_watcher_enabled: true
   daily_digest_enabled: true
   maintenance_budget_minutes: 3
+  max_tasks_per_cycle: 5
 """.strip(),
         encoding="utf-8",
     )
@@ -206,10 +216,104 @@ scheduler:
     result = CliRunner().invoke(app, ["scheduler", "run-once", "--execute"])
 
     assert result.exit_code == 0
-    assert "Scheduled: 3" in result.output
-    assert "Executed: 3" in result.output
+    assert "Scheduled: 5" in result.output
+    assert "Executed: 5" in result.output
     assert "watch.raw: completed" in result.output
     assert (vault / "output" / "watch-raw.md").exists()
+
+
+def test_scheduler_respects_max_tasks_per_cycle_and_schedules_no_high_risk(tmp_path: Path):
+    vault = tmp_path / "vault"
+    _make_valid_vault(vault)
+    taskboard = TaskboardStore(tmp_path / "state" / "taskboard.sqlite")
+    audit = AuditLog(
+        events_path=tmp_path / "state" / "audit" / "events.jsonl",
+        chain_path=tmp_path / "state" / "audit" / "hash_chain.jsonl",
+    )
+    settings = Settings(
+        vault=VaultSettings(path=vault),
+        scheduler=SchedulerSettings(
+            enabled=True,
+            raw_watcher_enabled=True,
+            inbox_watcher_enabled=True,
+            daily_digest_enabled=True,
+            maintenance_budget_minutes=10,
+            max_tasks_per_cycle=3,
+        ),
+    )
+
+    summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit)
+
+    assert len(summary.scheduled) == 3
+    assert [job.command for job in summary.scheduled] == [
+        "watch.raw",
+        "watch.inbox",
+        "daily.digest",
+    ]
+    rows = _task_rows(tmp_path / "state" / "taskboard.sqlite")
+    assert all(status == "queued" for _command, status in rows)
+    assert audit.verify() is True
+
+
+def test_scheduler_watch_inbox_scans_local_vault_inbox_without_elaborati(tmp_path: Path):
+    vault = tmp_path / "vault"
+    _make_valid_vault(vault)
+    (vault / "inbox").mkdir()
+    (vault / "inbox" / "new-note.md").write_text("# New\n", encoding="utf-8")
+    (vault / "raw" / "elaborati" / "secret.md").write_text("DO_NOT_SCAN_18", encoding="utf-8")
+    taskboard = TaskboardStore(tmp_path / "state" / "taskboard.sqlite")
+    audit = AuditLog(
+        events_path=tmp_path / "state" / "audit" / "events.jsonl",
+        chain_path=tmp_path / "state" / "audit" / "hash_chain.jsonl",
+    )
+    settings = Settings(
+        vault=VaultSettings(path=vault),
+        scheduler=SchedulerSettings(
+            enabled=True,
+            inbox_watcher_enabled=True,
+            maintenance_budget_minutes=0,
+            max_tasks_per_cycle=1,
+        ),
+    )
+
+    summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit, execute=True)
+
+    assert [item.command for item in summary.executed] == ["watch.inbox"]
+    report = (vault / "output" / "inbox-watch.md").read_text(encoding="utf-8")
+    assert "inbox/new-note.md" in report
+    assert "DO_NOT_SCAN_18" not in report
+
+
+def test_scheduler_failure_uses_scheduler_cooldown_minutes(tmp_path: Path, monkeypatch):
+    vault = tmp_path / "vault"
+    _make_valid_vault(vault)
+    taskboard = TaskboardStore(tmp_path / "state" / "taskboard.sqlite")
+    audit = AuditLog(
+        events_path=tmp_path / "state" / "audit" / "events.jsonl",
+        chain_path=tmp_path / "state" / "audit" / "hash_chain.jsonl",
+    )
+    settings = Settings(
+        vault=VaultSettings(path=vault),
+        scheduler=SchedulerSettings(
+            enabled=True,
+            raw_watcher_enabled=True,
+            maintenance_budget_minutes=0,
+            cooldown_minutes_after_failure=60,
+        ),
+    )
+
+    def fail_command(command, settings):
+        raise RuntimeError("forced scheduler failure")
+
+    monkeypatch.setattr("segretario.scheduler.jobs._execute_command", fail_command)
+
+    summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit, execute=True)
+
+    assert summary.executed[0].status == "queued"
+    task = taskboard.get_task(1)
+    assert task is not None
+    assert task["status"] == "queued"
+    assert task["lease_expires_at"] is not None
 
 
 def _make_valid_vault(vault: Path) -> None:

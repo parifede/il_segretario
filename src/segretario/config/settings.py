@@ -67,6 +67,9 @@ class SchedulerSettings(BaseModel):
     inbox_watcher_enabled: bool = False
     daily_digest_enabled: bool = False
     maintenance_budget_minutes: int = 10
+    max_tasks_per_cycle: int = 5
+    cooldown_minutes_after_failure: int = 60
+    no_user_notification_unless_useful: bool = True
 
 
 class Settings(BaseModel):

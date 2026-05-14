@@ -24,7 +24,7 @@ from segretario.config.loader import default_config_path, load_settings
 from segretario.connectors.google_oauth import GoogleOAuthConnector
 from segretario.policies.permissions import PermissionKernel
 from segretario.policies.privacy import project_private_context
-from segretario.scheduler.jobs import run_scheduler_once
+from segretario.scheduler.jobs import SchedulerJob, run_scheduler_once
 from segretario.taskboard import TaskboardStore
 from segretario.taskboard import TaskStatus
 from segretario.taskboard.payloads import TaskPayloadStore
@@ -1382,7 +1382,17 @@ def run_maintenance(
             "maintenance_budget_minutes": max(settings.scheduler.maintenance_budget_minutes, 1),
         }
     )
-    _run_scheduler_cli(settings.model_copy(update={"scheduler": scheduler}), execute=True)
+    maintenance_job = SchedulerJob(
+        command="maintenance.cycle",
+        action=PermissionKernel.OUTPUT_WRITE,
+        risk="low",
+        reason=f"bounded maintenance budget {scheduler.maintenance_budget_minutes} minutes",
+    )
+    _run_scheduler_cli(
+        settings.model_copy(update={"scheduler": scheduler}),
+        execute=True,
+        candidate_jobs=[maintenance_job],
+    )
 
 
 @app.command("watch")
@@ -1400,6 +1410,7 @@ def watch(
         update={
             "enabled": True,
             "raw_watcher_enabled": True,
+            "inbox_watcher_enabled": True,
             "daily_digest_enabled": False,
             "maintenance_budget_minutes": 0,
         }
@@ -1426,7 +1437,7 @@ def scheduler_run_once(
     _run_scheduler_cli(settings, execute=execute)
 
 
-def _run_scheduler_cli(settings, *, execute: bool) -> None:
+def _run_scheduler_cli(settings, *, execute: bool, candidate_jobs: list[SchedulerJob] | None = None) -> None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     audit = AuditLog(
         events_path=settings.audit.events_path,
@@ -1437,6 +1448,7 @@ def _run_scheduler_cli(settings, *, execute: bool) -> None:
         taskboard=taskboard,
         audit=audit,
         execute=execute,
+        candidate_jobs=candidate_jobs,
     )
     typer.echo(f"Scheduler: {'enabled' if summary.enabled else 'disabled'}")
     typer.echo(f"Preflight: {'ok' if summary.preflight_ok else 'failed'}")
