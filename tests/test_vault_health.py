@@ -64,6 +64,69 @@ def test_lint_detects_duplicate_index_headings_and_orphan_knowledge_pages(tmp_pa
     assert "knowledge/Known.md: orphan knowledge page" not in report.issues
 
 
+def test_lint_uses_frontmatter_title_for_orphan_detection(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "knowledge").mkdir()
+    (vault / "meta" / "index.md").write_text(
+        "# Index\n\n## Knowledge\n- [[Alpha Topic]]\n",
+        encoding="utf-8",
+    )
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    (vault / "knowledge" / "alpha-topic.md").write_text(
+        "---\ntitle: Alpha Topic\nstatus: active\n---\n# Alpha Topic\n",
+        encoding="utf-8",
+    )
+
+    report = lint_vault(vault, today=date(2026, 5, 11))
+
+    assert "knowledge/alpha-topic.md: orphan knowledge page" not in report.issues
+
+
+def test_lint_does_not_flag_raw_source_referenced_by_knowledge_frontmatter(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "knowledge").mkdir()
+    (vault / "raw" / "articles").mkdir(parents=True)
+    (vault / "meta" / "index.md").write_text(
+        "# Index\n\n## Knowledge\n- [[Processed]]\n",
+        encoding="utf-8",
+    )
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    (vault / "knowledge" / "processed.md").write_text(
+        "---\ntitle: Processed\nstatus: active\nsource_path: raw/articles/source.md\n---\n# Processed\n",
+        encoding="utf-8",
+    )
+    (vault / "raw" / "articles" / "source.md").write_text("# Source\n", encoding="utf-8")
+
+    report = lint_vault(vault, today=date(2026, 5, 11))
+
+    assert "raw/articles/source.md: unprocessed raw file" not in report.issues
+
+
+def test_lint_detects_missing_status_frontmatter_and_appends_log(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "knowledge").mkdir()
+    (vault / "meta" / "index.md").write_text(
+        "# Index\n\n## Knowledge\n- [[Known]]\n",
+        encoding="utf-8",
+    )
+    log = vault / "meta" / "log.md"
+    log.write_text("# Log\n- old entry\n", encoding="utf-8")
+    (vault / "knowledge" / "Known.md").write_text(
+        "---\ntitle: Known\n---\n# Known\n",
+        encoding="utf-8",
+    )
+
+    report = lint_vault(vault, today=date(2026, 5, 11))
+
+    assert "knowledge/Known.md: missing status in frontmatter" in report.issues
+    log_text = log.read_text(encoding="utf-8")
+    assert log_text.startswith("# Log\n- old entry\n")
+    assert "- 2026-05-11 lint wiki -> output/lint-2026-05-11.md" in log_text
+
+
 def test_lint_detects_stale_stubs_unprocessed_raw_and_personal_knowledge(
     tmp_path: Path,
 ):

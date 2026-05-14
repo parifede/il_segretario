@@ -57,10 +57,12 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
 
     body = _body_without_title(source_body)
     body = _convert_markdown_links_to_wikilinks(body)
+    body = _add_outbound_links(vault, body, title)
     frontmatter = {
         "title": title,
         "source_path": relative_source,
         "content_class": "knowledge",
+        "status": "active",
         "privacy": "private",
         "cloud_ok": False,
         "updated": date.today().isoformat(),
@@ -156,6 +158,30 @@ def _extract_key_points(body: str) -> list[str]:
         if len(points) == 3:
             break
     return points
+
+
+def _add_outbound_links(vault: Path, body: str, title: str) -> str:
+    linked = body
+    for related_title in _existing_knowledge_titles(vault, exclude_title=title)[:2]:
+        pattern = rf"(?<!\[\[)\b{re.escape(related_title)}\b(?!\]\])"
+        updated = re.sub(pattern, f"[[{related_title}]]", linked, count=1, flags=re.IGNORECASE)
+        linked = updated
+    return linked
+
+
+def _existing_knowledge_titles(vault: Path, *, exclude_title: str) -> list[str]:
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return []
+
+    titles: list[str] = []
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, body = parse_frontmatter(text)
+        candidate = str(metadata.get("title") or _extract_title(body, page.stem))
+        if candidate.casefold() != exclude_title.casefold() and candidate not in titles:
+            titles.append(candidate)
+    return titles
 
 
 def _add_inbound_links(vault: Path, title: str, target_relative: str) -> None:

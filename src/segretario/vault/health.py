@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from segretario.vault.frontmatter import parse_frontmatter
+from segretario.vault.index_log import append_log
 from segretario.vault.paths import classify_vault_path
 
 
@@ -56,6 +57,7 @@ def lint_vault(vault_path: Path | str, *, today: date | None = None) -> LintRepo
         index_text = index_path.read_text(encoding="utf-8")
         issues.extend(_duplicate_heading_issues(index_text))
         issues.extend(_orphan_knowledge_issues(vault, index_text))
+    issues.extend(_missing_status_issues(vault))
     issues.extend(_stale_stub_issues(vault, report_date))
     issues.extend(_unprocessed_raw_issues(vault))
     issues.extend(_personal_knowledge_issues(vault))
@@ -64,6 +66,7 @@ def lint_vault(vault_path: Path | str, *, today: date | None = None) -> LintRepo
     report_path = vault / relative_report
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(_render_report(report_date, issues), encoding="utf-8")
+    _append_lint_log(vault, report_date, relative_report)
 
     return LintReport(path=relative_report, issues=issues)
 
@@ -88,9 +91,25 @@ def _orphan_knowledge_issues(vault: Path, index_text: str) -> list[str]:
 
     for page in sorted(knowledge_dir.rglob("*.md")):
         relative = page.relative_to(vault).as_posix()
-        title = page.stem
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, body = parse_frontmatter(text)
+        title = str(metadata.get("title") or _extract_title(body, page.stem))
         if title not in linked_titles:
             issues.append(f"{relative}: orphan knowledge page")
+    return issues
+
+
+def _missing_status_issues(vault: Path) -> list[str]:
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return []
+    issues: list[str] = []
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        relative = page.relative_to(vault).as_posix()
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, _body = parse_frontmatter(text)
+        if not str(metadata.get("status", "")).strip():
+            issues.append(f"{relative}: missing status in frontmatter")
     return issues
 
 
@@ -119,6 +138,7 @@ def _unprocessed_raw_issues(vault: Path) -> list[str]:
     raw_dir = vault / "raw"
     if not raw_dir.exists():
         return []
+    processed_sources = _processed_raw_sources(vault)
     issues: list[str] = []
     for path in sorted(raw_dir.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
@@ -126,8 +146,24 @@ def _unprocessed_raw_issues(vault: Path) -> list[str]:
         relative = path.relative_to(vault).as_posix()
         if classify_vault_path(relative).skip:
             continue
+        if relative in processed_sources:
+            continue
         issues.append(f"{relative}: unprocessed raw file")
     return issues
+
+
+def _processed_raw_sources(vault: Path) -> set[str]:
+    knowledge_dir = vault / "knowledge"
+    if not knowledge_dir.exists():
+        return set()
+    sources: set[str] = set()
+    for page in sorted(knowledge_dir.rglob("*.md")):
+        text = page.read_text(encoding="utf-8", errors="replace")
+        metadata, _body = parse_frontmatter(text)
+        source_path = metadata.get("source_path")
+        if isinstance(source_path, str) and source_path:
+            sources.add(Path(source_path).as_posix().strip("/"))
+    return sources
 
 
 def _personal_knowledge_issues(vault: Path) -> list[str]:
@@ -164,6 +200,16 @@ def _looks_personal(text: str) -> bool:
     return any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def _extract_title(text: str, fallback: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        heading = re.match(r"^#\s+(.+)$", stripped)
+        return heading.group(1).strip() if heading else fallback
+    return fallback
+
+
 def _render_report(report_date: date, issues: list[str]) -> str:
     lines = [f"# Vault lint {report_date.isoformat()}", ""]
     if issues:
@@ -172,3 +218,11 @@ def _render_report(report_date: date, issues: list[str]) -> str:
         lines.append("- ok")
     lines.append("")
     return "\n".join(lines)
+
+
+def _append_lint_log(vault: Path, report_date: date, relative_report: str) -> None:
+    log_path = vault / "meta" / "log.md"
+    if not log_path.exists():
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("# Log\n", encoding="utf-8")
+    append_log(vault, f"- {report_date.isoformat()} lint wiki -> {relative_report}")

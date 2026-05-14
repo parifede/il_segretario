@@ -20,6 +20,7 @@ def test_ingest_markdown_creates_knowledge_page_index_and_log(tmp_path: Path):
     assert written.startswith("---\n")
     assert "title: Source Topic\n" in written
     assert "source_path: raw/articles/source.md\n" in written
+    assert "status: active\n" in written
     assert "[[Existing]]" in written
     assert "- [[Source Topic]]" in (vault / "meta" / "index.md").read_text(encoding="utf-8")
     assert "ingest raw/articles/source.md -> knowledge/source-topic.md" in (
@@ -68,6 +69,26 @@ def test_ingest_adds_inbound_wikilink_from_related_knowledge_page(tmp_path: Path
     ingest_article(vault, "raw/articles/source.md", auto=True)
 
     assert "[[Source Topic]]" in related.read_text(encoding="utf-8")
+
+
+def test_ingest_adds_outbound_wikilinks_to_existing_related_pages(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    knowledge = vault / "knowledge"
+    source.parent.mkdir(parents=True)
+    knowledge.mkdir(parents=True)
+    (knowledge / "alpha-topic.md").write_text("# Alpha Topic\n\nExisting alpha.\n", encoding="utf-8")
+    (knowledge / "beta-topic.md").write_text("# Beta Topic\n\nExisting beta.\n", encoding="utf-8")
+    source.write_text(
+        "# Source Topic\n\nThis note relates Alpha Topic and Beta Topic.\n",
+        encoding="utf-8",
+    )
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    written = (knowledge / "source-topic.md").read_text(encoding="utf-8")
+    assert "[[Alpha Topic]]" in written
+    assert "[[Beta Topic]]" in written
 
 
 def test_ingest_removes_source_title_after_leading_blank_lines(tmp_path: Path):
