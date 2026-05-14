@@ -32,6 +32,7 @@ def test_fetch_link_saves_public_page_to_raw_articles(tmp_path: Path):
     assert saved.exists()
     written = saved.read_text(encoding="utf-8")
     assert "source_url:" in written
+    assert "fetched_at:" in written
     assert "title: Local Research Note" in written
     assert "# Local Research Note" in written
     assert "Alpha beta from a local HTTP page." in written

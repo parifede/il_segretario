@@ -853,6 +853,8 @@ def web(
                 "query": query,
                 "context_privacy": context_privacy,
                 "projection": projection,
+                "vault_path": settings.vault.path,
+                "save_dir": settings.web.save_dir,
             },
             risk="low" if action == "web.public_query" else "medium",
             action=action,
@@ -862,6 +864,11 @@ def web(
         typer.echo(result.message)
         raise typer.Exit(1)
     typer.echo(f"web query: {result.output['query']}")
+    if result.output.get("path"):
+        typer.echo(f"saved: {result.output['path']}")
+    if result.output.get("ingested_path"):
+        action_label = "updated" if result.output.get("ingested_updated") else "created"
+        typer.echo(f"{action_label}: {result.output['ingested_path']}")
 
 
 @mail_app.command("read")
