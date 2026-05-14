@@ -2,6 +2,7 @@
 
 from datetime import date
 from pathlib import Path
+import sys
 
 import typer
 import yaml
@@ -59,7 +60,12 @@ app.add_typer(agents_app, name="agents")
 
 
 def _echo(message: object = "", *, debug: bool = False) -> None:
-    typer.echo(sanitize_user_output(message, debug=debug))
+    text = sanitize_user_output(message, debug=debug)
+    try:
+        typer.echo(text)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "utf-8"
+        typer.echo(text.encode(encoding, errors="replace").decode(encoding))
 
 
 @app.command()

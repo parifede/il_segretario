@@ -2,6 +2,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from segretario import cli
 from segretario.cli import app
 from segretario.policies.output_guard import sanitize_user_output
 from segretario.taskboard import TaskboardStore
@@ -106,3 +107,20 @@ def test_output_guard_preserves_error_context_when_privacy_map_is_redacted():
     assert "meta/privacy_map.local.json: [REDACTED_LOCAL_PRIVACY_MAP]" in sanitized
     assert "PERSON_TOKEN_A" not in sanitized
     assert "Mario" not in sanitized
+
+
+def test_cli_echo_degrades_unprintable_console_characters(monkeypatch):
+    calls: list[str] = []
+
+    def fake_echo(value):
+        text = str(value)
+        calls.append(text)
+        if len(calls) == 1:
+            raise UnicodeEncodeError("cp1252", text, 0, 1, "cannot encode")
+
+    monkeypatch.setattr(cli.typer, "echo", fake_echo)
+    monkeypatch.setattr(cli.sys, "stdout", type("Stdout", (), {"encoding": "cp1252"})())
+
+    cli._echo("blocked ❌")
+
+    assert calls == ["blocked ❌", "blocked ?"]
