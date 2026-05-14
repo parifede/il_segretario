@@ -18,13 +18,22 @@ class MaintenanceAgent(BaseAgent):
         action = self.require_allowed_action(self.command(request, payload))
 
         if action == "stats":
-            return asdict(vault_stats(self.require_vault_path(payload)))
+            return asdict(
+                vault_stats(
+                    self.require_vault_path(payload),
+                    skip_paths=_skip_paths(payload),
+                )
+            )
 
         if action == "lint.wiki":
             today = payload.get("today")
             if today is not None and not isinstance(today, date):
                 raise ValueError("today must be a date")
-            report = lint_vault(self.require_vault_path(payload), today=today)
+            report = lint_vault(
+                self.require_vault_path(payload),
+                today=today,
+                skip_paths=_skip_paths(payload),
+            )
             return {"path": report.path, "report_path": report.path, "issues": report.issues}
 
         if action == "relink.dry_run":
@@ -35,6 +44,7 @@ class MaintenanceAgent(BaseAgent):
                 self.require_vault_path(payload),
                 source_scope=_source_scope(payload),
                 today=today,
+                skip_paths=_skip_paths(payload),
             )
             return {
                 "path": report.path,
@@ -50,6 +60,7 @@ class MaintenanceAgent(BaseAgent):
                 self.require_vault_path(payload),
                 source_scope=_source_scope(payload),
                 today=today,
+                skip_paths=_skip_paths(payload),
             )
             return {
                 "path": report.path,
@@ -65,3 +76,10 @@ def _source_scope(payload: dict[str, Any]) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _skip_paths(payload: dict[str, Any]) -> list[str]:
+    value = payload.get("skip_paths")
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []

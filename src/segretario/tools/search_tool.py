@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from segretario.vault.paths import classify_vault_path
+from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 
 
 @dataclass(frozen=True)
@@ -23,12 +23,14 @@ class SearchTool:
         *,
         include_self: bool = False,
         include_raw: bool = False,
+        skip_paths: list[str] | tuple[str, ...] | None = None,
     ) -> list[SearchResult]:
         return search_vault(
             vault_path,
             query,
             include_self=include_self,
             include_raw=include_raw,
+            skip_paths=skip_paths,
         )
 
 
@@ -38,6 +40,7 @@ def search_vault(
     *,
     include_self: bool = False,
     include_raw: bool = False,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
 ) -> list[SearchResult]:
     vault = Path(vault_path)
     needle = query.casefold()
@@ -53,7 +56,12 @@ def search_vault(
             continue
 
         relative = _relative_vault_path(vault, file_path)
-        if _should_skip(relative, include_self=include_self, include_raw=include_raw):
+        if _should_skip(
+            relative,
+            include_self=include_self,
+            include_raw=include_raw,
+            skip_paths=skip_paths,
+        ):
             continue
 
         for line_number, line in enumerate(_read_lines(file_path), start=1):
@@ -64,9 +72,17 @@ def search_vault(
     return results
 
 
-def _should_skip(relative: str, *, include_self: bool, include_raw: bool) -> bool:
+def _should_skip(
+    relative: str,
+    *,
+    include_self: bool,
+    include_raw: bool,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> bool:
     policy = classify_vault_path(relative)
     parts = relative.split("/")
+    if matches_configured_skip_path(relative, skip_paths):
+        return True
     if policy.skip:
         return True
     if parts[:1] == ["self"] and not include_self:

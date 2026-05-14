@@ -8,7 +8,7 @@ from pathlib import Path
 
 from segretario.vault.frontmatter import parse_frontmatter
 from segretario.vault.index_log import append_log
-from segretario.vault.paths import classify_vault_path
+from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 
 
 @dataclass(frozen=True)
@@ -23,13 +23,18 @@ class LintReport:
     issues: list[str]
 
 
-def vault_stats(vault_path: Path | str) -> VaultStats:
+def vault_stats(
+    vault_path: Path | str,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
+) -> VaultStats:
     vault = Path(vault_path)
     counts: Counter[str] = Counter()
 
     for file_path in sorted(vault.rglob("*.md")):
         relative = file_path.relative_to(vault)
-        if classify_vault_path(relative.as_posix()).skip:
+        relative_text = relative.as_posix()
+        if _should_skip(relative_text, skip_paths):
             continue
         if relative.parts:
             counts[relative.parts[0]] += 1
@@ -41,7 +46,12 @@ def vault_stats(vault_path: Path | str) -> VaultStats:
     )
 
 
-def lint_vault(vault_path: Path | str, *, today: date | None = None) -> LintReport:
+def lint_vault(
+    vault_path: Path | str,
+    *,
+    today: date | None = None,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
+) -> LintReport:
     vault = Path(vault_path)
     report_date = today or date.today()
     issues: list[str] = []
@@ -56,11 +66,11 @@ def lint_vault(vault_path: Path | str, *, today: date | None = None) -> LintRepo
     if index_path.exists():
         index_text = index_path.read_text(encoding="utf-8")
         issues.extend(_duplicate_heading_issues(index_text))
-        issues.extend(_orphan_knowledge_issues(vault, index_text))
-    issues.extend(_missing_status_issues(vault))
-    issues.extend(_stale_stub_issues(vault, report_date))
-    issues.extend(_unprocessed_raw_issues(vault))
-    issues.extend(_personal_knowledge_issues(vault))
+        issues.extend(_orphan_knowledge_issues(vault, index_text, skip_paths=skip_paths))
+    issues.extend(_missing_status_issues(vault, skip_paths=skip_paths))
+    issues.extend(_stale_stub_issues(vault, report_date, skip_paths=skip_paths))
+    issues.extend(_unprocessed_raw_issues(vault, skip_paths=skip_paths))
+    issues.extend(_personal_knowledge_issues(vault, skip_paths=skip_paths))
 
     relative_report = f"output/lint-{report_date.isoformat()}.md"
     report_path = vault / relative_report
@@ -82,7 +92,12 @@ def _duplicate_heading_issues(index_text: str) -> list[str]:
     return [f"meta/index.md: duplicate heading '{heading}'" for heading in duplicates]
 
 
-def _orphan_knowledge_issues(vault: Path, index_text: str) -> list[str]:
+def _orphan_knowledge_issues(
+    vault: Path,
+    index_text: str,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
     linked_titles = {match.strip() for match in re.findall(r"\[\[([^\]#|]+)", index_text)}
     issues: list[str] = []
     knowledge_dir = vault / "knowledge"
@@ -91,6 +106,8 @@ def _orphan_knowledge_issues(vault: Path, index_text: str) -> list[str]:
 
     for page in sorted(knowledge_dir.rglob("*.md")):
         relative = page.relative_to(vault).as_posix()
+        if _should_skip(relative, skip_paths):
+            continue
         text = page.read_text(encoding="utf-8", errors="replace")
         metadata, body = parse_frontmatter(text)
         title = str(metadata.get("title") or _extract_title(body, page.stem))
@@ -99,13 +116,19 @@ def _orphan_knowledge_issues(vault: Path, index_text: str) -> list[str]:
     return issues
 
 
-def _missing_status_issues(vault: Path) -> list[str]:
+def _missing_status_issues(
+    vault: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
     knowledge_dir = vault / "knowledge"
     if not knowledge_dir.exists():
         return []
     issues: list[str] = []
     for page in sorted(knowledge_dir.rglob("*.md")):
         relative = page.relative_to(vault).as_posix()
+        if _should_skip(relative, skip_paths):
+            continue
         text = page.read_text(encoding="utf-8", errors="replace")
         metadata, _body = parse_frontmatter(text)
         if not str(metadata.get("status", "")).strip():
@@ -113,7 +136,12 @@ def _missing_status_issues(vault: Path) -> list[str]:
     return issues
 
 
-def _stale_stub_issues(vault: Path, report_date: date) -> list[str]:
+def _stale_stub_issues(
+    vault: Path,
+    report_date: date,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
     issues: list[str] = []
     knowledge_dir = vault / "knowledge"
     if not knowledge_dir.exists():
@@ -121,6 +149,8 @@ def _stale_stub_issues(vault: Path, report_date: date) -> list[str]:
 
     for page in sorted(knowledge_dir.rglob("*.md")):
         relative = page.relative_to(vault).as_posix()
+        if _should_skip(relative, skip_paths):
+            continue
         text = page.read_text(encoding="utf-8", errors="replace")
         metadata, body = parse_frontmatter(text)
         if str(metadata.get("status", "")).casefold() != "stub":
@@ -134,7 +164,11 @@ def _stale_stub_issues(vault: Path, report_date: date) -> list[str]:
     return issues
 
 
-def _unprocessed_raw_issues(vault: Path) -> list[str]:
+def _unprocessed_raw_issues(
+    vault: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
     raw_dir = vault / "raw"
     if not raw_dir.exists():
         return []
@@ -144,7 +178,7 @@ def _unprocessed_raw_issues(vault: Path) -> list[str]:
         if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
             continue
         relative = path.relative_to(vault).as_posix()
-        if classify_vault_path(relative).skip:
+        if _should_skip(relative, skip_paths):
             continue
         if relative in processed_sources:
             continue
@@ -166,13 +200,19 @@ def _processed_raw_sources(vault: Path) -> set[str]:
     return sources
 
 
-def _personal_knowledge_issues(vault: Path) -> list[str]:
+def _personal_knowledge_issues(
+    vault: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
     knowledge_dir = vault / "knowledge"
     if not knowledge_dir.exists():
         return []
     issues: list[str] = []
     for page in sorted(knowledge_dir.rglob("*.md")):
         relative = page.relative_to(vault).as_posix()
+        if _should_skip(relative, skip_paths):
+            continue
         text = page.read_text(encoding="utf-8", errors="replace")
         if _looks_personal(text):
             issues.append(f"{relative}: personal-looking content in knowledge")
@@ -226,3 +266,13 @@ def _append_lint_log(vault: Path, report_date: date, relative_report: str) -> No
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("# Log\n", encoding="utf-8")
     append_log(vault, f"- {report_date.isoformat()} lint wiki -> {relative_report}")
+
+
+def _should_skip(
+    relative: str,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> bool:
+    return classify_vault_path(relative).skip or matches_configured_skip_path(
+        relative,
+        skip_paths,
+    )

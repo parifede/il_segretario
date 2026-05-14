@@ -43,6 +43,17 @@ def classify_vault_path(path: str, *, operation: str = "read") -> VaultPathPolic
     return VaultPathPolicy(path=normalized)
 
 
+def matches_configured_skip_path(path: str, skip_paths: list[str] | tuple[str, ...] | None) -> bool:
+    normalized = _normalize(path)
+    for skip_path in skip_paths or ():
+        normalized_skip = _normalize(str(skip_path))
+        if not normalized_skip:
+            continue
+        if normalized == normalized_skip or normalized.startswith(f"{normalized_skip}/"):
+            return True
+    return False
+
+
 def _normalize(path: str) -> str:
     normalized = path.replace("\\", "/").strip("/")
     if ".." in PurePosixPath(normalized).parts:

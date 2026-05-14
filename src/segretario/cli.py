@@ -208,7 +208,11 @@ def search(
     result = _build_core(settings).handle(
         TaskRequest(
             command="search",
-            payload={"vault_path": settings.vault.path, "query": query},
+            payload={
+                "vault_path": settings.vault.path,
+                "query": query,
+                "skip_paths": settings.vault.skip_paths,
+            },
             risk="low",
             action="vault.search",
         )
@@ -259,7 +263,11 @@ def stats(
     result = _build_core(settings).handle(
         TaskRequest(
             command="stats",
-            payload={"vault_path": settings.vault.path, "action": "stats"},
+            payload={
+                "vault_path": settings.vault.path,
+                "action": "stats",
+                "skip_paths": settings.vault.skip_paths,
+            },
             risk="low",
             action="vault.search",
         )
@@ -755,7 +763,11 @@ def lint_wiki(
     result = _build_core(settings).handle(
         TaskRequest(
             command="lint.wiki",
-            payload={"vault_path": settings.vault.path, "action": "lint.wiki"},
+            payload={
+                "vault_path": settings.vault.path,
+                "action": "lint.wiki",
+                "skip_paths": settings.vault.skip_paths,
+            },
             risk="low",
             action="output.write",
         )
@@ -809,6 +821,7 @@ def relink(
                 "vault_path": settings.vault.path,
                 "action": command,
                 "source_scope": scope,
+                "skip_paths": settings.vault.skip_paths,
             },
             risk="low",
             action=action,

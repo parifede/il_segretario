@@ -26,5 +26,13 @@ class SearchAgent(BaseAgent):
             str(payload["query"]),
             include_self=bool(payload.get("include_self", False)),
             include_raw=bool(payload.get("include_raw", False)),
+            skip_paths=_skip_paths(payload),
         )
         return SearchMatches(asdict(result) for result in results)
+
+
+def _skip_paths(payload: dict[str, Any]) -> list[str]:
+    value = payload.get("skip_paths")
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []

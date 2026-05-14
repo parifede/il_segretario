@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from segretario.vault.frontmatter import parse_frontmatter, render_frontmatter
-from segretario.vault.paths import classify_vault_path
+from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 from segretario.vault.wikilinks import extract_wikilink_targets
 
 
@@ -39,12 +39,17 @@ def relink_dry_run(
     *,
     source_scope: str | None = None,
     today: date | None = None,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
 ) -> RelinkReport:
     vault = Path(vault_path)
     report_date = today or date.today()
     suggestions = [
         suggestion.render()
-        for suggestion in _find_suggestions(vault, source_scope=source_scope)
+        for suggestion in _find_suggestions(
+            vault,
+            source_scope=source_scope,
+            skip_paths=skip_paths,
+        )
     ]
 
     relative_report = f"output/relink-{report_date.isoformat()}.md"
@@ -59,12 +64,17 @@ def relink_apply(
     *,
     source_scope: str | None = None,
     today: date | None = None,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
 ) -> RelinkReport:
     vault = Path(vault_path)
     report_date = today or date.today()
     applied: list[str] = []
 
-    for suggestion in _find_suggestions(vault, source_scope=source_scope):
+    for suggestion in _find_suggestions(
+        vault,
+        source_scope=source_scope,
+        skip_paths=skip_paths,
+    ):
         source_path = vault / suggestion.source_path
         text = source_path.read_text(encoding="utf-8", errors="replace")
         metadata, body = parse_frontmatter(text)
@@ -85,9 +95,10 @@ def _find_suggestions(
     vault: Path,
     *,
     source_scope: str | None = None,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
 ) -> list[RelinkSuggestion]:
     normalized_scope = _normalize_source_scope(source_scope)
-    pages = _collect_pages(vault)
+    pages = _collect_pages(vault, skip_paths=skip_paths)
     title_counts = Counter(page.title.casefold() for page in pages)
     suggestions: list[RelinkSuggestion] = []
     seen_suggestions: set[str] = set()
@@ -132,12 +143,16 @@ def _is_within_scope(relative_path: str, scope: str) -> bool:
     return relative_path == scope or relative_path.startswith(f"{scope}/")
 
 
-def _collect_pages(vault: Path) -> list[WikiPage]:
+def _collect_pages(
+    vault: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[WikiPage]:
     pages: list[WikiPage] = []
     for path in sorted(vault.rglob("*.md")):
         relative = path.relative_to(vault).as_posix()
         policy = classify_vault_path(relative)
-        if policy.skip:
+        if policy.skip or matches_configured_skip_path(relative, skip_paths):
             continue
         parts = relative.split("/")
         if parts[:1] not in (["knowledge"], ["meta"], ["output"]):
