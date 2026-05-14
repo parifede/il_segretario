@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 import re
+import shutil
 import zlib
 
 import yaml
 
 from segretario.vault.index_log import append_log
+from segretario.vault.frontmatter import parse_frontmatter
 from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 from segretario.vault.repair import _processed_raw_sources
 
@@ -16,6 +19,8 @@ PDF_SOURCE_SIZE_LIMIT = 25 * 1024 * 1024
 PDF_STREAM_SIZE_LIMIT = 5 * 1024 * 1024
 PDF_TEXT_SIZE_LIMIT = 1_000_000
 PDF_PAGE_LIMIT = 300
+PDF_OCR_PAGE_LIMIT = 25
+PDF_OCR_MAX_RENDER_DIMENSION = 2200
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,15 @@ class ExtractorTool:
         skip_paths: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, str]:
         return extract_pdf(vault_path, source_path, skip_paths=skip_paths)
+
+    def ocr_pdf(
+        self,
+        vault_path: Path | str,
+        marker_path: Path | str,
+        *,
+        skip_paths: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, str]:
+        return ocr_pdf(vault_path, marker_path, skip_paths=skip_paths)
 
 
 def plan_extraction(
@@ -163,6 +177,62 @@ def extract_pdf(
     return {"path": target_relative, "source_path": relative_source}
 
 
+def ocr_pdf(
+    vault_path: Path | str,
+    marker_path: Path | str,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    vault = Path(vault_path)
+    relative_marker = _normalize_ocr_marker(marker_path, skip_paths=skip_paths)
+    marker = vault / relative_marker
+    _require_inside(vault, marker)
+    if not marker.exists():
+        raise FileNotFoundError(marker)
+    if marker.is_symlink():
+        raise ValueError("OCR marker cannot be a symlink")
+
+    metadata, _body = parse_frontmatter(marker.read_text(encoding="utf-8", errors="replace"))
+    if metadata.get("status") != "needs_ocr":
+        raise ValueError("OCR marker must have status needs_ocr")
+    source_path = metadata.get("source_path")
+    if not isinstance(source_path, str) or not source_path.strip():
+        raise ValueError("OCR marker missing source_path")
+    relative_source = _normalize_pdf_source(source_path, skip_paths=skip_paths)
+    source = vault / relative_source
+    _require_inside(vault, source)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_symlink():
+        raise ValueError("OCR source cannot be a symlink")
+    if shutil.which("tesseract") is None:
+        raise ValueError("OCR requires Tesseract installed and available on PATH")
+
+    text = _ocr_pdf_with_tesseract(source)
+    if not text.strip():
+        raise ValueError("OCR produced no text")
+
+    title = str(metadata.get("title") or source.stem.replace("_", " ").replace("-", " ").strip() or "OCR PDF")
+    metadata.update(
+        {
+            "source_path": relative_source,
+            "extracted_from": "pdf",
+            "extractor": "pymupdf+pytesseract",
+            "ocr_engine": "tesseract",
+            "status": "ocr_extracted",
+            "privacy": "private",
+            "cloud_ok": False,
+            "updated": date.today().isoformat(),
+        }
+    )
+    marker.write_text(
+        _render_extracted_markdown(metadata, title, text, has_text=True),
+        encoding="utf-8",
+    )
+    append_log(vault, f"- {date.today().isoformat()} ocr {relative_source} -> {relative_marker}")
+    return {"path": relative_marker, "source_path": relative_source}
+
+
 def _normalize_pdf_source(
     source_path: Path | str,
     *,
@@ -182,6 +252,28 @@ def _normalize_pdf_source(
         raise ValueError("extract source must be under raw and outside skipped paths")
     if Path(relative).suffix.casefold() != ".pdf":
         raise ValueError("extract source must be a pdf")
+    return relative
+
+
+def _normalize_ocr_marker(
+    marker_path: Path | str,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    relative = Path(marker_path).as_posix().strip("/")
+    parts = tuple(Path(relative).parts)
+    if ".." in parts:
+        raise ValueError("OCR marker path cannot contain parent traversal")
+    if Path(marker_path).is_absolute():
+        raise ValueError("OCR marker path must be vault-relative")
+    if (
+        parts[:2] != ("raw", "extracted")
+        or classify_vault_path(relative).skip
+        or matches_configured_skip_path(relative, skip_paths)
+    ):
+        raise ValueError("OCR marker must be under raw/extracted and outside skipped paths")
+    if Path(relative).suffix.casefold() != ".md":
+        raise ValueError("OCR marker must be a markdown file")
     return relative
 
 
@@ -231,6 +323,46 @@ def _extract_text_with_pymupdf(source: Path) -> str:
                 raise ValueError("pdf extracted text exceeds size limit")
             chunks.append(page_text)
         return "\n".join(chunks)
+
+
+def _ocr_pdf_with_tesseract(source: Path) -> str:
+    try:
+        import fitz
+        from PIL import Image
+        import pytesseract
+    except ImportError as exc:
+        raise ValueError("OCR requires PyMuPDF, Pillow, and pytesseract") from exc
+
+    try:
+        document = fitz.open(source)
+    except Exception:
+        return ""
+    with document:
+        if document.page_count > PDF_OCR_PAGE_LIMIT:
+            raise ValueError("pdf source exceeds OCR page limit")
+        chunks: list[str] = []
+        total = 0
+        for page in document:
+            scale = _ocr_render_scale(float(page.rect.width), float(page.rect.height))
+            pixmap = page.get_pixmap(
+                matrix=fitz.Matrix(scale, scale),
+                colorspace=fitz.csRGB,
+                alpha=False,
+            )
+            image = Image.open(BytesIO(pixmap.tobytes("png")))
+            page_text = pytesseract.image_to_string(image).strip()
+            if not page_text:
+                continue
+            total += len(page_text)
+            if total > PDF_TEXT_SIZE_LIMIT:
+                raise ValueError("OCR extracted text exceeds size limit")
+            chunks.append(page_text)
+        return "\n\n".join(chunks)
+
+
+def _ocr_render_scale(width: float, height: float) -> float:
+    longest_side = max(width, height, 1.0)
+    return max(1.0, min(2.0, PDF_OCR_MAX_RENDER_DIMENSION / longest_side))
 
 
 def _extract_text_from_pdf_bytes(data: bytes) -> str:

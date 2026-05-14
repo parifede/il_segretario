@@ -33,6 +33,8 @@ from segretario.taskboard import TaskStatus
 from segretario.taskboard.payloads import TaskPayloadStore
 from segretario.tools.extractor_tool import plan_extraction
 from segretario.tools.ollama_tool import build_local_llm
+from segretario.vault.frontmatter import parse_frontmatter
+from segretario.vault.paths import matches_configured_skip_path
 from segretario.vault.repair import repair_raw_plan as build_repair_raw_plan
 
 app = typer.Typer(no_args_is_help=True)
@@ -50,6 +52,7 @@ task_app = typer.Typer(help="Single task commands.")
 agents_app = typer.Typer(help="Agent worker commands.")
 repair_app = typer.Typer(help="Vault repair commands.")
 extract_app = typer.Typer(help="Rich source extraction planning commands.")
+ocr_app = typer.Typer(help="Local OCR queue commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -64,6 +67,7 @@ app.add_typer(task_app, name="task")
 app.add_typer(agents_app, name="agents")
 app.add_typer(repair_app, name="repair")
 app.add_typer(extract_app, name="extract")
+app.add_typer(ocr_app, name="ocr")
 
 
 def _echo(message: object = "", *, debug: bool = False) -> None:
@@ -587,6 +591,7 @@ def _run_queued_task(settings, task_id: int) -> None:
             1
             if str(task.get("risk", "")).lower() in {"high", "critical"}
             or str(task.get("command", "")).startswith("extract.")
+            or str(task.get("command", "")).startswith("ocr.")
             else settings.taskboard.max_retries
         )
         taskboard.record_failure(
@@ -669,6 +674,7 @@ def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
             1
             if str(task.get("risk", "")).lower() in {"high", "critical"}
             or command.startswith("extract.")
+            or command.startswith("ocr.")
             else settings.taskboard.max_retries
         )
         taskboard.record_failure(
@@ -1192,6 +1198,69 @@ def extract_pdf_command(
     _echo(f"extracted: {output['path']}")
 
 
+@ocr_app.command("queue")
+def ocr_queue_command(
+    limit: int = typer.Option(
+        5,
+        "--limit",
+        min=0,
+        help="Maximum number of needs_ocr markers to queue.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Queue local OCR tasks for extracted PDF markers that need OCR."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    active_markers = _active_markers_for_command(taskboard, payload_store, "ocr.pdf")
+    candidates = [
+        marker_path
+        for marker_path in _ocr_needs_ocr_markers(settings.vault.path, skip_paths=settings.vault.skip_paths)
+        if marker_path not in active_markers
+    ][:limit]
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    queued: list[tuple[int, str]] = []
+    for marker_path in candidates:
+        request = TaskRequest(
+            command="ocr.pdf",
+            payload={
+                "vault_path": settings.vault.path,
+                "marker_path": marker_path,
+                "action": "ocr.pdf",
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action=PermissionKernel.OUTPUT_WRITE,
+            source="ocr",
+            requested_by="segretario",
+        )
+        task = taskboard.create_task(
+            source="ocr",
+            requested_by="segretario",
+            command="ocr.pdf",
+            risk="low",
+            assigned_agent="agent-runner",
+            input_ref="pending",
+        )
+        payload_ref = payload_store.save(int(task["id"]), request)
+        taskboard.update_input_ref(int(task["id"]), payload_ref)
+        audit.append_event("ocr.task_queued", {"task_id": task["id"], "marker_path": marker_path})
+        queued.append((int(task["id"]), marker_path))
+
+    _echo(f"Queued OCR tasks: {len(queued)}")
+    for task_id, marker_path in queued:
+        _echo(f"- {task_id}: {marker_path}")
+
+
 def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
     candidates: list[str] = []
     for item in items:
@@ -1201,6 +1270,28 @@ def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
         if source:
             candidates.append(source)
     return candidates
+
+
+def _ocr_needs_ocr_markers(
+    vault_path: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    vault = Path(vault_path)
+    extracted_dir = vault / "raw" / "extracted"
+    if not extracted_dir.exists():
+        return []
+    markers: list[str] = []
+    for marker in sorted(extracted_dir.rglob("*.md")):
+        if not marker.is_file():
+            continue
+        relative = marker.relative_to(vault).as_posix()
+        if matches_configured_skip_path(relative, skip_paths):
+            continue
+        metadata, _body = parse_frontmatter(marker.read_text(encoding="utf-8", errors="replace"))
+        if metadata.get("status") == "needs_ocr" and isinstance(metadata.get("source_path"), str):
+            markers.append(relative)
+    return markers
 
 
 def _extract_plan_candidates(items: list[str], *, kind: str) -> list[str]:
@@ -1244,6 +1335,30 @@ def _active_sources_for_command(
         if source_path:
             sources.add(str(source_path).replace("\\", "/"))
     return sources
+
+
+def _active_markers_for_command(
+    taskboard: TaskboardStore,
+    payload_store: TaskPayloadStore,
+    command: str,
+) -> set[str]:
+    active_statuses = {
+        TaskStatus.QUEUED.value,
+        TaskStatus.RUNNING.value,
+        TaskStatus.WAITING_CONFIRMATION.value,
+    }
+    markers: set[str] = set()
+    for task in taskboard.list_tasks(limit=1000):
+        if task.get("command") != command or task.get("status") not in active_statuses:
+            continue
+        try:
+            request = payload_store.load(str(task.get("input_ref") or ""))
+        except (FileNotFoundError, ValueError, KeyError):
+            continue
+        marker_path = request.payload.get("marker_path")
+        if marker_path:
+            markers.add(str(marker_path).replace("\\", "/"))
+    return markers
 
 
 @app.command()
@@ -1963,6 +2078,7 @@ def _agent_command_map():
         "repair.raw_plan": MaintenanceAgent(),
         "extract.plan": ExtractionAgent(),
         "extract.pdf": ExtractionAgent(),
+        "ocr.pdf": ExtractionAgent(),
         "ingest": IngestAgent(),
         "link": ResearchAgent(),
         "web": ResearchAgent(),

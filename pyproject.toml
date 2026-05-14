@@ -16,6 +16,8 @@ dependencies = [
   "google-auth>=2",
   "google-auth-oauthlib>=1",
   "pymupdf>=1.27.2.3",
+  "pytesseract>=0.3.13",
+  "pillow>=12.2.0",
 ]
 
 [project.scripts]

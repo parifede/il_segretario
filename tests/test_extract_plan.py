@@ -150,6 +150,56 @@ def test_agents_run_marks_image_only_pdf_needs_ocr_without_blocking_queue(
     assert _audit(tmp_path).verify() is True
 
 
+def test_ocr_queue_runs_needs_ocr_items_and_fails_cleanly_without_tesseract(
+    tmp_path: Path,
+    monkeypatch,
+):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "scan.pdf").write_bytes(_blank_pdf_bytes())
+    extracted_dir = vault / "raw" / "extracted"
+    extracted_dir.mkdir(parents=True)
+    (extracted_dir / "scan.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "title: scan",
+                "source_path: raw/scan.pdf",
+                "extracted_from: pdf",
+                "extractor: pymupdf",
+                "status: needs_ocr",
+                "privacy: private",
+                "cloud_ok: false",
+                "---",
+                "",
+                "# scan",
+                "",
+                "OCR review required before ingest.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    monkeypatch.setenv("PATH", "")
+    runner = CliRunner()
+
+    queued = runner.invoke(app, ["ocr", "queue", "--limit", "1"])
+    result = runner.invoke(app, ["agents", "run", "--limit", "1"])
+
+    assert queued.exit_code == 0
+    assert "Queued OCR tasks: 1" in queued.output
+    assert "raw/extracted/scan.md" in queued.output
+    assert result.exit_code == 0
+    assert "ocr.pdf failed" in result.output
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    row = db.execute("select command, status, last_error from tasks order by id").fetchone()
+    assert row == ("ocr.pdf", "failed", "OCR requires Tesseract installed and available on PATH")
+    text = (extracted_dir / "scan.md").read_text(encoding="utf-8")
+    assert "status: needs_ocr" in text
+    assert _audit(tmp_path).verify() is True
+
+
 def test_pdf_extraction_rejects_elaborati_path(tmp_path: Path, monkeypatch):
     vault = _make_vault(tmp_path)
     (vault / "raw" / "elaborati" / "secret.pdf").write_bytes(_simple_pdf_bytes("SECRET"))
