@@ -132,7 +132,7 @@ def _extract_title(text: str, fallback: str) -> str:
 
 
 def _body_without_title(text: str) -> str:
-    lines = text.splitlines()
+    lines = text.lstrip().splitlines()
     if lines and (lines[0].startswith("# ") or lines[0].strip()):
         return "\n".join(lines[1:]).strip()
     return text.strip()

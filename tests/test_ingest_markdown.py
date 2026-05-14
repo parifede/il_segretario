@@ -70,6 +70,19 @@ def test_ingest_adds_inbound_wikilink_from_related_knowledge_page(tmp_path: Path
     assert "[[Source Topic]]" in related.read_text(encoding="utf-8")
 
 
+def test_ingest_removes_source_title_after_leading_blank_lines(tmp_path: Path):
+    vault = tmp_path / "vault"
+    source = vault / "raw" / "articles" / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("\n# Source Topic\n\nBody after title.\n", encoding="utf-8")
+
+    ingest_article(vault, "raw/articles/source.md", auto=True)
+
+    written = (vault / "knowledge" / "source-topic.md").read_text(encoding="utf-8")
+    assert written.count("# Source Topic") == 1
+    assert "Body after title." in written
+
+
 def test_ingest_does_not_modify_raw_source(tmp_path: Path):
     vault = tmp_path / "vault"
     source = vault / "raw" / "articles" / "source.md"
