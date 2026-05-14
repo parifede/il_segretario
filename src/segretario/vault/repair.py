@@ -104,6 +104,8 @@ def _raw_plan_items(
             continue
         if relative in processed:
             continue
+        if _is_needs_ocr_extracted_marker(path, relative):
+            continue
         proposal, reason = _raw_plan_decision(relative)
         items.append(f"- {relative} -> {proposal}: {reason}")
     return items
@@ -148,6 +150,13 @@ def _raw_plan_decision(relative: str) -> tuple[str, str]:
     if suffix:
         return "leave_in_raw", f"unsupported {suffix.removeprefix('.')} source"
     return "leave_in_raw", "unsupported source"
+
+
+def _is_needs_ocr_extracted_marker(path: Path, relative: str) -> bool:
+    if not relative.startswith("raw/extracted/") or Path(relative).suffix.casefold() != ".md":
+        return False
+    metadata, _body = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+    return metadata.get("status") == "needs_ocr"
 
 
 def _looks_private_raw_path(relative: str) -> bool:

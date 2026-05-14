@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from segretario.audit import AuditLog
 from segretario.cli import app
 from segretario.tools.extractor_tool import plan_extraction
+from segretario.vault.repair import repair_raw_plan
 
 
 def test_extract_plan_classifies_rich_sources_without_reading_elaborati(tmp_path: Path):
@@ -116,9 +117,35 @@ def test_agents_run_extracts_queued_pdf_to_raw_extracted(tmp_path: Path, monkeyp
     text = extracted.read_text(encoding="utf-8")
     assert "source_path: raw/course.pdf" in text
     assert "extracted_from: pdf" in text
+    assert "extractor: pypdf" in text
     assert "privacy: private" in text
     assert "cloud_ok: false" in text
     assert "Hello PDF extraction" in text
+    assert _audit(tmp_path).verify() is True
+
+
+def test_agents_run_marks_image_only_pdf_needs_ocr_without_blocking_queue(
+    tmp_path: Path,
+    monkeypatch,
+):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "scan.pdf").write_bytes(_blank_pdf_bytes())
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["extract", "queue", "--kind", "pdf", "--limit", "1"])
+
+    result = runner.invoke(app, ["agents", "run", "--limit", "1"])
+
+    assert result.exit_code == 0
+    assert "extract.pdf completed -> raw/extracted/scan.md" in result.output
+    extracted = vault / "raw" / "extracted" / "scan.md"
+    text = extracted.read_text(encoding="utf-8")
+    assert "status: needs_ocr" in text
+    assert "OCR review required before ingest" in text
+    assert "raw/scan.pdf" in (vault / "meta" / "log.md").read_text(encoding="utf-8")
+    raw_plan = repair_raw_plan(vault, skip_paths=["raw/elaborati"])
+    assert "raw/extracted/scan.md" not in "\n".join(raw_plan.items)
     assert _audit(tmp_path).verify() is True
 
 
@@ -222,18 +249,58 @@ audit:
 
 def _simple_pdf_bytes(text: str) -> bytes:
     escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    return (
-        "%PDF-1.4\n"
-        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
-        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
-        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
-        f"4 0 obj << /Length {len(escaped) + 41} >> stream\n"
-        "BT /F1 12 Tf 72 720 Td "
-        f"({escaped}) Tj"
-        " ET\n"
-        "endstream endobj\n"
-        "trailer << /Root 1 0 R >>\n%%EOF\n"
-    ).encode("latin-1")
+    stream = f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET\n".encode("latin-1")
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n"
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\n"
+        b"endobj\n",
+        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        b"5 0 obj\n<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"endstream\nendobj\n",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj)
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf)
+
+
+def _blank_pdf_bytes() -> bytes:
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n"
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << >> >>\n"
+        b"endobj\n",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj)
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf)
 
 
 def _audit(tmp_path: Path) -> AuditLog:

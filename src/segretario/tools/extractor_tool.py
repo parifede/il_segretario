@@ -12,6 +12,11 @@ from segretario.vault.index_log import append_log
 from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 from segretario.vault.repair import _processed_raw_sources
 
+PDF_SOURCE_SIZE_LIMIT = 25 * 1024 * 1024
+PDF_STREAM_SIZE_LIMIT = 5 * 1024 * 1024
+PDF_TEXT_SIZE_LIMIT = 1_000_000
+PDF_PAGE_LIMIT = 300
+
 
 @dataclass(frozen=True)
 class ExtractPlanReport:
@@ -126,12 +131,11 @@ def extract_pdf(
         raise FileNotFoundError(source)
     if source.is_symlink():
         raise ValueError("extract source cannot be a symlink")
-    if source.stat().st_size > 25 * 1024 * 1024:
+    if source.stat().st_size > PDF_SOURCE_SIZE_LIMIT:
         raise ValueError("pdf source exceeds extraction size limit")
 
-    text = _extract_text_from_pdf_bytes(source.read_bytes())
-    if not text.strip():
-        raise ValueError("pdf text extraction produced no text")
+    text, extractor = _extract_pdf_text(source)
+    has_text = bool(text.strip())
 
     slug = _slugify(source.stem)
     target_relative = f"raw/extracted/{slug}.md"
@@ -145,12 +149,16 @@ def extract_pdf(
         "title": title,
         "source_path": relative_source,
         "extracted_from": "pdf",
-        "status": "extracted",
+        "extractor": extractor,
+        "status": "extracted" if has_text else "needs_ocr",
         "privacy": "private",
         "cloud_ok": False,
         "updated": date.today().isoformat(),
     }
-    target.write_text(_render_extracted_markdown(frontmatter, title, text), encoding="utf-8")
+    target.write_text(
+        _render_extracted_markdown(frontmatter, title, text, has_text=has_text),
+        encoding="utf-8",
+    )
     append_log(vault, f"- {date.today().isoformat()} extract {relative_source} -> {target_relative}")
     return {"path": target_relative, "source_path": relative_source}
 
@@ -184,6 +192,46 @@ def _require_inside(root: Path, candidate: Path) -> None:
         raise ValueError("path escapes allowed vault boundary")
 
 
+def _extract_pdf_text(source: Path) -> tuple[str, str]:
+    text = _extract_text_with_pypdf(source)
+    if text.strip():
+        return (text, "pypdf")
+    fallback_text = _extract_text_from_pdf_bytes(source.read_bytes())
+    if fallback_text.strip():
+        return (fallback_text, "fallback")
+    return ("", "pypdf+fallback")
+
+
+def _extract_text_with_pypdf(source: Path) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+
+    try:
+        reader = PdfReader(str(source), strict=False)
+    except Exception:
+        return ""
+    if len(reader.pages) > PDF_PAGE_LIMIT:
+        raise ValueError("pdf source exceeds extraction page limit")
+
+    chunks: list[str] = []
+    total = 0
+    for page in reader.pages:
+        try:
+            page_text = page.extract_text() or ""
+        except Exception:
+            continue
+        page_text = page_text.strip()
+        if not page_text:
+            continue
+        total += len(page_text)
+        if total > PDF_TEXT_SIZE_LIMIT:
+            raise ValueError("pdf extracted text exceeds size limit")
+        chunks.append(page_text)
+    return "\n".join(chunks)
+
+
 def _extract_text_from_pdf_bytes(data: bytes) -> str:
     chunks: list[str] = []
     for stream in _pdf_streams(data):
@@ -197,7 +245,7 @@ def _extract_text_from_pdf_bytes(data: bytes) -> str:
                 lines.append(cleaned)
                 seen.add(cleaned)
     text = "\n".join(lines)
-    if len(text) > 1_000_000:
+    if len(text) > PDF_TEXT_SIZE_LIMIT:
         raise ValueError("pdf extracted text exceeds size limit")
     return text
 
@@ -221,14 +269,14 @@ def _pdf_streams(data: bytes) -> list[bytes]:
         header = data[header_start:stream_index]
         body = data[body_start:end_index].strip(b"\r\n")
         start = end_index + len(b"endstream")
-        if len(body) > 5 * 1024 * 1024:
+        if len(body) > PDF_STREAM_SIZE_LIMIT:
             continue
         if b"/FlateDecode" in header:
             try:
                 body = zlib.decompress(body)
             except zlib.error:
                 continue
-        if len(body) > 5 * 1024 * 1024:
+        if len(body) > PDF_STREAM_SIZE_LIMIT:
             continue
         streams.append(body)
     return streams
@@ -435,9 +483,18 @@ def _decode_pdf_hex(raw: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _render_extracted_markdown(frontmatter: dict[str, object], title: str, text: str) -> str:
+def _render_extracted_markdown(
+    frontmatter: dict[str, object],
+    title: str,
+    text: str,
+    *,
+    has_text: bool,
+) -> str:
     metadata = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False)
-    return f"---\n{metadata}---\n\n# {title}\n\n{text.strip()}\n"
+    body = text.strip()
+    if not has_text:
+        body = "No embedded text was available for local extraction. OCR review required before ingest."
+    return f"---\n{metadata}---\n\n# {title}\n\n{body}\n"
 
 
 def _slugify(value: str) -> str:
