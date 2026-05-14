@@ -130,6 +130,67 @@ def test_task_cancel_cli_cancels_non_terminal_task_and_audits(
     assert "gmail.send requires confirmation" not in listed.output
 
 
+def test_task_cancel_latest_cancels_newest_waiting_task_for_command(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["calendar", "accept", "event_old"])
+    old_task_id = _latest_task_id(tmp_path)
+    runner.invoke(app, ["calendar", "accept", "event_new"])
+    new_task_id = _latest_task_id(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "task",
+            "cancel-latest",
+            "calendar.accept",
+            "--reason",
+            "latest accept probe",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert f"cancelled: {new_task_id}" in result.output
+    assert _task_status(tmp_path, new_task_id) == "cancelled"
+    assert _task_status(tmp_path, old_task_id) == "waiting_confirmation"
+    assert _audit(tmp_path).verify() is True
+
+
+def test_task_approve_run_latest_approves_and_executes_newest_task_for_command(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    created = runner.invoke(app, ["calendar", "create", "Original latest event"])
+    event_id = created.output.strip().split("event: ", 1)[1]
+    runner.invoke(app, ["calendar", "modify", event_id, "Updated latest event"])
+    task_id = _latest_task_id(tmp_path)
+
+    result = runner.invoke(app, ["task", "approve-run-latest", "calendar.modify"])
+
+    assert result.exit_code == 0
+    assert f"approved: {task_id}" in result.output
+    assert f"task {task_id}: completed" in result.output
+    assert _task_status(tmp_path, task_id) == "completed"
+    assert _audit(tmp_path).verify() is True
+
+
+def test_task_latest_helpers_report_missing_waiting_task(tmp_path: Path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    result = CliRunner().invoke(app, ["task", "cancel-latest", "calendar.accept"])
+
+    assert result.exit_code == 1
+    assert "no waiting confirmation task found for calendar.accept" in result.output
+
+
 def _write_config(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     vault.mkdir()

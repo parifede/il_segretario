@@ -394,6 +394,73 @@ def task_cancel(
     typer.echo(f"cancelled: {task_id}")
 
 
+@task_app.command("cancel-latest")
+def task_cancel_latest(
+    command: str,
+    reason: str = typer.Option("operator cancelled latest task", "--reason", help="Cancellation reason."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Cancel the newest waiting confirmation task for a command."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    try:
+        task_id = _latest_waiting_task_id(taskboard, command)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    task = taskboard.cancel_task(task_id, reason=reason)
+    audit.append_event(
+        "task.cancelled_by_operator",
+        {"task_id": task_id, "command": task["command"], "reason": reason},
+    )
+    typer.echo(f"cancelled: {task_id}")
+
+
+@task_app.command("approve-run-latest")
+def task_approve_run_latest(
+    command: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Approve and immediately run the newest waiting confirmation task for a command."""
+    settings = load_settings(config_path=config)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    try:
+        task_id = _latest_waiting_task_id(taskboard, command)
+        task = taskboard.approve_task(task_id)
+    except (KeyError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    audit.append_event(
+        "task.approved",
+        {"task_id": task_id, "command": task["command"]},
+    )
+    typer.echo(f"approved: {task_id}")
+    _run_queued_task(settings, task_id)
+    typer.echo(f"task {task_id}: completed")
+
+
 @agents_app.command("run-once")
 def agents_run_once(
     config: Path | None = typer.Option(
@@ -485,6 +552,17 @@ def _run_queued_task(settings, task_id: int) -> None:
         "task.completed",
         {"task_id": task_id, "command": request.command, "output": output_ref},
     )
+
+
+def _latest_waiting_task_id(taskboard: TaskboardStore, command: str) -> int:
+    for task in taskboard.list_tasks(limit=100):
+        if (
+            task["command"] == command
+            and task["status"] == TaskStatus.WAITING_CONFIRMATION.value
+            and task["requires_confirmation"]
+        ):
+            return int(task["id"])
+    raise ValueError(f"no waiting confirmation task found for {command}")
 
 
 def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
