@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
+import os
 from pathlib import Path
 import re
 import shutil
@@ -205,10 +206,11 @@ def ocr_pdf(
         raise FileNotFoundError(source)
     if source.is_symlink():
         raise ValueError("OCR source cannot be a symlink")
-    if shutil.which("tesseract") is None:
+    tesseract_command = _tesseract_command()
+    if tesseract_command is None:
         raise ValueError("OCR requires Tesseract installed and available on PATH")
 
-    text = _ocr_pdf_with_tesseract(source)
+    text = _ocr_pdf_with_tesseract(source, tesseract_command=tesseract_command)
     if not text.strip():
         raise ValueError("OCR produced no text")
 
@@ -325,7 +327,17 @@ def _extract_text_with_pymupdf(source: Path) -> str:
         return "\n".join(chunks)
 
 
-def _ocr_pdf_with_tesseract(source: Path) -> str:
+def _tesseract_command() -> str | None:
+    configured = os.environ.get("TESSERACT_CMD", "").strip()
+    if configured and Path(configured).is_file():
+        return configured
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    return None
+
+
+def _ocr_pdf_with_tesseract(source: Path, *, tesseract_command: str) -> str:
     try:
         import fitz
         from PIL import Image
@@ -333,6 +345,7 @@ def _ocr_pdf_with_tesseract(source: Path) -> str:
     except ImportError as exc:
         raise ValueError("OCR requires PyMuPDF, Pillow, and pytesseract") from exc
 
+    pytesseract.pytesseract.tesseract_cmd = tesseract_command
     try:
         document = fitz.open(source)
     except Exception:

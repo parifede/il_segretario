@@ -36,6 +36,8 @@ uv run segretario lint wiki
 uv run segretario stats
 uv run segretario link "https://example.com/article"
 uv run segretario web "public research query"
+uv run segretario extract queue --kind pdf --limit 1
+uv run segretario ocr queue --limit 1
 uv run segretario mail read --query "subject:example"
 uv run segretario mail draft "write a reply to the last email"
 uv run segretario mail draft "Draft body" --to person@example.com --subject "Subject"
@@ -91,6 +93,24 @@ Prepare a privacy-safe web query from private context:
 ```powershell
 uv run segretario web "private-context query" --private-context --projection "privacy-safe query"
 ```
+
+Extract rich raw sources in local staging:
+
+```powershell
+uv run segretario extract plan
+uv run segretario extract queue --kind pdf --limit 1
+uv run segretario agents run --limit 1
+```
+
+PDFs with embedded text are extracted with PyMuPDF. Image-only PDFs are marked `status: needs_ocr` and can be queued for local OCR:
+
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+uv run segretario ocr queue --limit 1
+uv run segretario agents run --limit 1
+```
+
+`pytesseract` and `Pillow` are Python dependencies, but the Tesseract executable is a local system dependency. Install Tesseract separately or expose it through `TESSERACT_CMD`; do not store OCR output in `knowledge/` until the extracted marker has been reviewed or ingested through the normal vault flow.
 
 High-risk Gmail and Calendar operations use a confirmation runner:
 

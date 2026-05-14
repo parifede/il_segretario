@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from segretario.audit import AuditLog
 from segretario.cli import app
-from segretario.tools.extractor_tool import plan_extraction
+from segretario.tools.extractor_tool import _tesseract_command, plan_extraction
 from segretario.vault.repair import repair_raw_plan
 
 
@@ -198,6 +198,15 @@ def test_ocr_queue_runs_needs_ocr_items_and_fails_cleanly_without_tesseract(
     text = (extracted_dir / "scan.md").read_text(encoding="utf-8")
     assert "status: needs_ocr" in text
     assert _audit(tmp_path).verify() is True
+
+
+def test_tesseract_command_uses_explicit_env_path(tmp_path: Path, monkeypatch):
+    command = tmp_path / "tesseract.exe"
+    command.write_text("", encoding="utf-8")
+    monkeypatch.setenv("TESSERACT_CMD", str(command))
+    monkeypatch.setenv("PATH", "")
+
+    assert _tesseract_command() == str(command)
 
 
 def test_pdf_extraction_rejects_elaborati_path(tmp_path: Path, monkeypatch):
