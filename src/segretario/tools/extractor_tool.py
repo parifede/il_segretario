@@ -193,43 +193,44 @@ def _require_inside(root: Path, candidate: Path) -> None:
 
 
 def _extract_pdf_text(source: Path) -> tuple[str, str]:
-    text = _extract_text_with_pypdf(source)
+    text = _extract_text_with_pymupdf(source)
     if text.strip():
-        return (text, "pypdf")
+        return (text, "pymupdf")
     fallback_text = _extract_text_from_pdf_bytes(source.read_bytes())
     if fallback_text.strip():
         return (fallback_text, "fallback")
-    return ("", "pypdf+fallback")
+    return ("", "pymupdf")
 
 
-def _extract_text_with_pypdf(source: Path) -> str:
+def _extract_text_with_pymupdf(source: Path) -> str:
     try:
-        from pypdf import PdfReader
+        import fitz
     except ImportError:
         return ""
 
     try:
-        reader = PdfReader(str(source), strict=False)
+        document = fitz.open(source)
     except Exception:
         return ""
-    if len(reader.pages) > PDF_PAGE_LIMIT:
-        raise ValueError("pdf source exceeds extraction page limit")
+    with document:
+        if document.page_count > PDF_PAGE_LIMIT:
+            raise ValueError("pdf source exceeds extraction page limit")
 
-    chunks: list[str] = []
-    total = 0
-    for page in reader.pages:
-        try:
-            page_text = page.extract_text() or ""
-        except Exception:
-            continue
-        page_text = page_text.strip()
-        if not page_text:
-            continue
-        total += len(page_text)
-        if total > PDF_TEXT_SIZE_LIMIT:
-            raise ValueError("pdf extracted text exceeds size limit")
-        chunks.append(page_text)
-    return "\n".join(chunks)
+        chunks: list[str] = []
+        total = 0
+        for page in document:
+            try:
+                page_text = page.get_text("text") or ""
+            except Exception:
+                continue
+            page_text = page_text.strip()
+            if not page_text:
+                continue
+            total += len(page_text)
+            if total > PDF_TEXT_SIZE_LIMIT:
+                raise ValueError("pdf extracted text exceeds size limit")
+            chunks.append(page_text)
+        return "\n".join(chunks)
 
 
 def _extract_text_from_pdf_bytes(data: bytes) -> str:

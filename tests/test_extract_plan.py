@@ -117,7 +117,7 @@ def test_agents_run_extracts_queued_pdf_to_raw_extracted(tmp_path: Path, monkeyp
     text = extracted.read_text(encoding="utf-8")
     assert "source_path: raw/course.pdf" in text
     assert "extracted_from: pdf" in text
-    assert "extractor: pypdf" in text
+    assert "extractor: pymupdf" in text
     assert "privacy: private" in text
     assert "cloud_ok: false" in text
     assert "Hello PDF extraction" in text
@@ -142,6 +142,7 @@ def test_agents_run_marks_image_only_pdf_needs_ocr_without_blocking_queue(
     extracted = vault / "raw" / "extracted" / "scan.md"
     text = extracted.read_text(encoding="utf-8")
     assert "status: needs_ocr" in text
+    assert "extractor: pymupdf" in text
     assert "OCR review required before ingest" in text
     assert "raw/scan.pdf" in (vault / "meta" / "log.md").read_text(encoding="utf-8")
     raw_plan = repair_raw_plan(vault, skip_paths=["raw/elaborati"])
