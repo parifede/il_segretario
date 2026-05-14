@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+import re
 
 from segretario.policies.privacy import knowledge_export_decision
 from segretario.vault.frontmatter import parse_frontmatter
@@ -85,3 +86,74 @@ def _reject_no_export_markers(projection: str) -> None:
     forbidden = ("self/", "meta/privacy_map.local.json", "raw/elaborati")
     if any(marker in normalized for marker in forbidden):
         raise ValueError("projection contains no-export path markers")
+
+
+def sanitize_user_output(value: object, *, debug: bool = False) -> str:
+    """Filter user-facing text before CLI display.
+
+    Debug mode may preserve stack frames, but secrets are still redacted.
+    """
+
+    text = "" if value is None else str(value)
+    text = _redact_oauth_tokens(text)
+    text = _redact_sensitive_absolute_paths(text)
+    if not debug:
+        text = _remove_stack_trace(text)
+    text = _redact_privacy_map_contents(text)
+    return text
+
+
+def _remove_stack_trace(text: str) -> str:
+    if "Traceback (most recent call last):" not in text:
+        return text
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    last_line = lines[-1] if lines else "internal error"
+    if last_line.startswith('File "'):
+        last_line = "internal error"
+    return f"error: {last_line}"
+
+
+def _redact_oauth_tokens(text: str) -> str:
+    patterns = [
+        r"ya29\.[A-Za-z0-9._~-]+",
+        r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+",
+        r"(?i)((?:access|refresh|id)_token\s*[:=]\s*)[^\s,;]+",
+    ]
+    redacted = text
+    redacted = re.sub(patterns[0], "[REDACTED_OAUTH_TOKEN]", redacted)
+    redacted = re.sub(patterns[1], r"\1[REDACTED_OAUTH_TOKEN]", redacted)
+    redacted = re.sub(patterns[2], r"\1[REDACTED_OAUTH_TOKEN]", redacted)
+    return redacted
+
+
+def _redact_sensitive_absolute_paths(text: str) -> str:
+    path_pattern = r"[A-Za-z]:[\\/][^\s\"'<>|]+"
+
+    def replace(match: re.Match[str]) -> str:
+        path = match.group(0)
+        normalized = path.replace("\\", "/").casefold()
+        sensitive_markers = (
+            "/secrets/",
+            "/self/",
+            "/meta/privacy_map.local.json",
+            "/raw/elaborati/",
+        )
+        if any(marker in normalized for marker in sensitive_markers):
+            return "[LOCAL_PRIVATE_PATH]"
+        return path
+
+    return re.sub(path_pattern, replace, text)
+
+
+def _redact_privacy_map_contents(text: str) -> str:
+    normalized = text.replace("\\", "/").casefold()
+    if "meta/privacy_map.local.json" not in normalized:
+        return text
+    if "{" not in text and "[" not in text:
+        return text
+    marker_match = re.search(r"meta/privacy_map\.local\.json", text, flags=re.IGNORECASE)
+    if marker_match is None:
+        return text
+    prefix = text[: marker_match.start()]
+    marker = text[marker_match.start() : marker_match.end()]
+    return f"{prefix}{marker}: [REDACTED_LOCAL_PRIVACY_MAP]"

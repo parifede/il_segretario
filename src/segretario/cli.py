@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
@@ -22,6 +22,7 @@ from segretario.app.router import TaskRouter
 from segretario.audit import AuditLog
 from segretario.config.loader import default_config_path, load_settings
 from segretario.connectors.google_oauth import GoogleOAuthConnector
+from segretario.policies.output_guard import sanitize_user_output
 from segretario.policies.permissions import PermissionKernel
 from segretario.policies.privacy import project_private_context
 from segretario.scheduler.jobs import SchedulerJob, run_scheduler_once
@@ -55,6 +56,10 @@ app.add_typer(privacy_app, name="privacy")
 app.add_typer(audit_app, name="audit")
 app.add_typer(task_app, name="task")
 app.add_typer(agents_app, name="agents")
+
+
+def _echo(message: object = "", *, debug: bool = False) -> None:
+    typer.echo(sanitize_user_output(message, debug=debug))
 
 
 @app.command()
@@ -95,7 +100,7 @@ def status(
         f"Scheduler:    {'enabled' if settings.scheduler.enabled else 'disabled'}",
         "---------------------------",
     ]
-    typer.echo("\n".join(lines))
+    _echo("\n".join(lines))
 
 
 @config_app.command("show")
@@ -109,7 +114,7 @@ def config_show(
 ) -> None:
     """Print the resolved configuration with secrets paths only, never contents."""
     settings = load_settings(config_path=config)
-    typer.echo(yaml.safe_dump(settings.to_safe_dict(), sort_keys=False))
+    _echo(yaml.safe_dump(settings.to_safe_dict(), sort_keys=False))
 
 
 @google_app.command("status")
@@ -127,15 +132,15 @@ def google_status(
         credentials_path=settings.google.credentials_path,
         token_path=settings.google.token_path,
     ).status()
-    typer.echo(f"Google: {'configured' if status.configured else 'not configured'}")
-    typer.echo(f"Credentials: {status.credentials_path}")
-    typer.echo(f"Token: {status.token_path}")
+    _echo(f"Google: {'configured' if status.configured else 'not configured'}")
+    _echo(f"Credentials: {status.credentials_path}")
+    _echo(f"Token: {status.token_path}")
     if status.scopes_ok:
-        typer.echo("Scopes: ok")
+        _echo("Scopes: ok")
     else:
-        typer.echo("Scopes: missing")
+        _echo("Scopes: missing")
         for scope in status.missing_scopes:
-            typer.echo(f"- {scope}")
+            _echo(f"- {scope}")
 
 
 @google_app.command("login")
@@ -158,8 +163,8 @@ def google_login(
         credentials_path=settings.google.credentials_path,
         token_path=settings.google.token_path,
     ).login(force=force)
-    typer.echo(f"Google login: {'ok' if status.scopes_ok else 'missing scopes'}")
-    typer.echo(f"Token: {status.token_path}")
+    _echo(f"Google login: {'ok' if status.scopes_ok else 'missing scopes'}")
+    _echo(f"Token: {status.token_path}")
 
 
 @vault_app.command("check")
@@ -179,7 +184,7 @@ def vault_check(
     for relative in ("AGENTS.md", "meta/index.md", "meta/log.md"):
         path = vault / relative
         lines.append(f"{relative}: {'ok' if path.exists() else 'missing'}")
-    typer.echo("\n".join(lines))
+    _echo("\n".join(lines))
 
 
 @app.command()
@@ -203,14 +208,14 @@ def search(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     results = result.output
     if not results:
-        typer.echo("No matches found.")
+        _echo("No matches found.")
         return
     for result in results:
-        typer.echo(f"{result['path']}:{result['line']}: {result['snippet']}")
+        _echo(f"{result['path']}:{result['line']}: {result['snippet']}")
 
 
 @app.command()
@@ -229,9 +234,9 @@ def query(
     try:
         result = query_vault(settings.vault.path, question, llm=llm)
     except Exception as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(result.answer)
+    _echo(result.answer)
 
 
 @app.command()
@@ -254,13 +259,13 @@ def stats(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     summary = result.output
-    typer.echo("Vault stats")
+    _echo("Vault stats")
     for area, count in summary["markdown_by_area"].items():
-        typer.echo(f"{area}: {count}")
-    typer.echo(f"total_markdown: {summary['total_markdown']}")
+        _echo(f"{area}: {count}")
+    _echo(f"total_markdown: {summary['total_markdown']}")
 
 
 @app.command()
@@ -284,7 +289,7 @@ def tasks(
     taskboard.initialize()
     rows = taskboard.list_tasks(limit=limit, status=status_filter)
     if not rows:
-        typer.echo("No tasks found.")
+        _echo("No tasks found.")
         return
     for task in rows:
         if task["status"] in {"denied", "failed", "cancelled"}:
@@ -292,7 +297,7 @@ def tasks(
         else:
             reason = task.get("confirmation_reason") or task.get("last_error") or ""
         suffix = f" - {reason}" if reason else ""
-        typer.echo(
+        _echo(
             f"{task['id']}: {task['command']} [{task['status']}] risk={task['risk']}{suffix}"
         )
 
@@ -313,7 +318,7 @@ def task_show(
     taskboard.initialize()
     task = taskboard.get_task(task_id)
     if task is None:
-        typer.echo(f"unknown task id: {task_id}")
+        _echo(f"unknown task id: {task_id}")
         raise typer.Exit(1)
     for key in (
         "id",
@@ -340,7 +345,7 @@ def task_show(
             value = str(value).lower()
         elif value is None:
             value = ""
-        typer.echo(f"{key}: {value}")
+        _echo(f"{key}: {value}")
 
 
 @task_app.command("run")
@@ -358,9 +363,9 @@ def task_run(
     try:
         _run_queued_task(settings, task_id)
     except (FileNotFoundError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"task {task_id}: completed")
+    _echo(f"task {task_id}: completed")
 
 
 @task_app.command("cancel")
@@ -385,13 +390,13 @@ def task_cancel(
     try:
         task = taskboard.cancel_task(task_id, reason=reason)
     except (KeyError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
     audit.append_event(
         "task.cancelled_by_operator",
         {"task_id": task_id, "command": task["command"], "reason": reason},
     )
-    typer.echo(f"cancelled: {task_id}")
+    _echo(f"cancelled: {task_id}")
 
 
 @task_app.command("cancel-latest")
@@ -412,7 +417,7 @@ def task_cancel_latest(
     try:
         task_id = _latest_waiting_task_id(taskboard, command)
     except ValueError as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
 
     audit = AuditLog(
@@ -424,7 +429,7 @@ def task_cancel_latest(
         "task.cancelled_by_operator",
         {"task_id": task_id, "command": task["command"], "reason": reason},
     )
-    typer.echo(f"cancelled: {task_id}")
+    _echo(f"cancelled: {task_id}")
 
 
 @task_app.command("approve-run-latest")
@@ -445,7 +450,7 @@ def task_approve_run_latest(
         task_id = _latest_waiting_task_id(taskboard, command)
         task = taskboard.approve_task(task_id)
     except (KeyError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
 
     audit = AuditLog(
@@ -456,9 +461,9 @@ def task_approve_run_latest(
         "task.approved",
         {"task_id": task_id, "command": task["command"]},
     )
-    typer.echo(f"approved: {task_id}")
+    _echo(f"approved: {task_id}")
     _run_queued_task(settings, task_id)
-    typer.echo(f"task {task_id}: completed")
+    _echo(f"task {task_id}: completed")
 
 
 @agents_app.command("run-once")
@@ -474,13 +479,13 @@ def agents_run_once(
     settings = load_settings(config_path=config)
     result = _run_one_agent_task(settings)
     if result is None:
-        typer.echo("No runnable agent tasks.")
+        _echo("No runnable agent tasks.")
         return
     task_id, command, status, output_ref = result
     if output_ref:
-        typer.echo(f"{task_id}: {command} {status} -> {output_ref}")
+        _echo(f"{task_id}: {command} {status} -> {output_ref}")
     else:
-        typer.echo(f"{task_id}: {command} {status}")
+        _echo(f"{task_id}: {command} {status}")
 
 
 def _run_queued_task(settings, task_id: int) -> None:
@@ -539,7 +544,7 @@ def _run_queued_task(settings, task_id: int) -> None:
             "task.failed",
             {"task_id": task_id, "command": task["command"], "error": str(exc)},
         )
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
 
     output_ref = _cli_output_ref(output)
@@ -656,13 +661,13 @@ def approve(
     try:
         task = taskboard.approve_task(task_id)
     except (KeyError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
     audit.append_event(
         "task.approved",
         {"task_id": task_id, "command": task["command"]},
     )
-    typer.echo(f"approved: {task_id}")
+    _echo(f"approved: {task_id}")
 
 
 @app.command()
@@ -692,13 +697,13 @@ def deny(
             raise ValueError(f"task {task_id} is not waiting for confirmation")
         task = taskboard.deny_task(task_id, reason=reason)
     except (KeyError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
     audit.append_event(
         "task.denied_by_operator",
         {"task_id": task_id, "command": task["command"], "reason": reason},
     )
-    typer.echo(f"denied: {task_id}")
+    _echo(f"denied: {task_id}")
 
 
 @audit_app.command("verify")
@@ -717,9 +722,9 @@ def audit_verify(
         chain_path=settings.audit.hash_chain_path,
     )
     if audit.verify():
-        typer.echo("Audit verify: ok")
+        _echo("Audit verify: ok")
         return
-    typer.echo("Audit verify: failed")
+    _echo("Audit verify: failed")
     raise typer.Exit(1)
 
 
@@ -727,7 +732,7 @@ def audit_verify(
 def privacy_project(text: str) -> None:
     """Project private context into privacy-safe tokens and bands."""
     projection = project_private_context(text)
-    typer.echo(projection.text)
+    _echo(projection.text)
 
 
 @lint_app.command("wiki")
@@ -750,15 +755,15 @@ def lint_wiki(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     report = result.output
-    typer.echo(f"Lint report: {report['report_path']}")
+    _echo(f"Lint report: {report['report_path']}")
     if report["issues"]:
         for issue in report["issues"]:
-            typer.echo(f"- {issue}")
+            _echo(f"- {issue}")
     else:
-        typer.echo("- ok")
+        _echo("- ok")
 
 
 @app.command()
@@ -786,7 +791,7 @@ def relink(
 ) -> None:
     """Preview or apply missing Obsidian wikilinks."""
     if dry_run == apply:
-        typer.echo("choose exactly one: --dry-run or --apply")
+        _echo("choose exactly one: --dry-run or --apply")
         raise typer.Exit(1)
     settings = load_settings(config_path=config)
     command = "relink.dry_run" if dry_run else "relink.apply"
@@ -804,16 +809,16 @@ def relink(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     report = result.output
     label = "Relink report" if dry_run else "Relink apply report"
-    typer.echo(f"{label}: {report['report_path']}")
+    _echo(f"{label}: {report['report_path']}")
     if report["suggestions"]:
         for suggestion in report["suggestions"]:
-            typer.echo(f"- {suggestion}")
+            _echo(f"- {suggestion}")
     else:
-        typer.echo("- no missing links found")
+        _echo("- no missing links found")
 
 
 @app.command()
@@ -843,15 +848,15 @@ def ingest(
             )
         )
     except (ConfirmationNeededError, FileNotFoundError, ValueError) as exc:
-        typer.echo(str(exc))
+        _echo(str(exc))
         raise typer.Exit(1) from exc
 
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     output = result.output
     action = "updated" if output["updated"] else "created"
-    typer.echo(f"{action}: {output['path']}")
+    _echo(f"{action}: {output['path']}")
 
 
 @app.command()
@@ -868,7 +873,7 @@ def link(
     """Fetch a public web link into raw/articles."""
     settings = load_settings(config_path=config)
     if not settings.web.enabled:
-        typer.echo("web is disabled")
+        _echo("web is disabled")
         raise typer.Exit(1)
 
     core = _build_core(settings)
@@ -886,13 +891,13 @@ def link(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     saved_path = result.output["path"]
-    typer.echo(f"saved: {saved_path}")
+    _echo(f"saved: {saved_path}")
     if ingest and result.output.get("ingested_path"):
         action = "updated" if result.output.get("ingested_updated") else "created"
-        typer.echo(f"{action}: {result.output['ingested_path']}")
+        _echo(f"{action}: {result.output['ingested_path']}")
 
 
 @app.command()
@@ -918,7 +923,7 @@ def web(
     """Prepare a privacy-safe web query payload."""
     settings = load_settings(config_path=config)
     if not settings.web.enabled:
-        typer.echo("web is disabled")
+        _echo("web is disabled")
         raise typer.Exit(1)
 
     context_privacy = "private" if private_context else "public"
@@ -939,14 +944,14 @@ def web(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
-    typer.echo(f"web query: {result.output['query']}")
+    _echo(f"web query: {result.output['query']}")
     if result.output.get("path"):
-        typer.echo(f"saved: {result.output['path']}")
+        _echo(f"saved: {result.output['path']}")
     if result.output.get("ingested_path"):
         action_label = "updated" if result.output.get("ingested_updated") else "created"
-        typer.echo(f"{action_label}: {result.output['ingested_path']}")
+        _echo(f"{action_label}: {result.output['ingested_path']}")
 
 
 @mail_app.command("read")
@@ -973,13 +978,13 @@ def mail_read(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     if not result.output:
-        typer.echo("No messages found.")
+        _echo("No messages found.")
         return
     for message in result.output:
-        typer.echo(f"{message.get('id')}: {message.get('subject')} - {message.get('snippet')}")
+        _echo(f"{message.get('id')}: {message.get('subject')} - {message.get('snippet')}")
 
 
 @mail_app.command("draft")
@@ -999,7 +1004,7 @@ def mail_draft(
     settings = load_settings(config_path=config)
     draft_body = body if body is not None else prompt
     if not draft_body:
-        typer.echo("mail draft requires --body or a prompt argument")
+        _echo("mail draft requires --body or a prompt argument")
         raise typer.Exit(1)
     draft_to = to or ""
     draft_subject = subject or "Draft request"
@@ -1020,9 +1025,9 @@ def mail_draft(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
-    typer.echo(f"draft: {result.output['id']}")
+    _echo(f"draft: {result.output['id']}")
 
 
 @mail_app.command("send")
@@ -1045,9 +1050,9 @@ def mail_send(
             try:
                 _run_queued_task(settings, int(draft_or_task_id))
             except (FileNotFoundError, ValueError) as exc:
-                typer.echo(str(exc))
+                _echo(str(exc))
                 raise typer.Exit(1) from exc
-            typer.echo(f"task {draft_or_task_id}: completed")
+            _echo(f"task {draft_or_task_id}: completed")
             return
 
     result = _build_core(settings).handle(
@@ -1058,7 +1063,7 @@ def mail_send(
             action=PermissionKernel.GMAIL_SEND,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1082,7 +1087,7 @@ def mail_archive(
             action=PermissionKernel.GMAIL_ARCHIVE,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1106,7 +1111,7 @@ def mail_delete(
             action=PermissionKernel.GMAIL_DELETE,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1141,10 +1146,10 @@ def calendar_list(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     if not result.output:
-        typer.echo("No events found.")
+        _echo("No events found.")
         return
     events = [
         event
@@ -1152,10 +1157,10 @@ def calendar_list(
         if _event_in_calendar_range(event, from_date=from_date, to_date=to_date)
     ]
     if not events:
-        typer.echo("No events found.")
+        _echo("No events found.")
         return
     for event in events:
-        typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
+        _echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
 
 
 @calendar_app.command("read")
@@ -1179,10 +1184,10 @@ def calendar_read(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
     event = result.output
-    typer.echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
+    _echo(f"{event.get('id')}: {event.get('summary')} @ {event.get('when')}")
 
 
 @calendar_app.command("create")
@@ -1218,9 +1223,9 @@ def calendar_create(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
-    typer.echo(f"event: {result.output['id']}")
+    _echo(f"event: {result.output['id']}")
 
 
 @calendar_app.command("schedule")
@@ -1251,9 +1256,9 @@ def calendar_schedule(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
-    typer.echo(f"event: {result.output['id']}")
+    _echo(f"event: {result.output['id']}")
 
 
 @calendar_app.command("modify")
@@ -1272,7 +1277,7 @@ def calendar_modify(
     settings = load_settings(config_path=config)
     summary_change = summary if summary is not None else summary_arg
     if not summary_change:
-        typer.echo("calendar.modify requires a summary change")
+        _echo("calendar.modify requires a summary change")
         raise typer.Exit(1)
     result = _build_core(settings).handle(
         TaskRequest(
@@ -1286,7 +1291,7 @@ def calendar_modify(
             action=PermissionKernel.CALENDAR_MODIFY,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1310,7 +1315,7 @@ def calendar_delete(
             action=PermissionKernel.CALENDAR_DELETE,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1334,7 +1339,7 @@ def calendar_accept(
             action=PermissionKernel.CALENDAR_ACCEPT,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1358,7 +1363,7 @@ def calendar_decline(
             action=PermissionKernel.CALENDAR_DECLINE,
         )
     )
-    typer.echo(result.message)
+    _echo(result.message)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -1450,23 +1455,23 @@ def _run_scheduler_cli(settings, *, execute: bool, candidate_jobs: list[Schedule
         execute=execute,
         candidate_jobs=candidate_jobs,
     )
-    typer.echo(f"Scheduler: {'enabled' if summary.enabled else 'disabled'}")
-    typer.echo(f"Preflight: {'ok' if summary.preflight_ok else 'failed'}")
-    typer.echo(f"Budget: {summary.budget_minutes} minutes")
-    typer.echo(f"Scheduled: {len(summary.scheduled)}")
+    _echo(f"Scheduler: {'enabled' if summary.enabled else 'disabled'}")
+    _echo(f"Preflight: {'ok' if summary.preflight_ok else 'failed'}")
+    _echo(f"Budget: {summary.budget_minutes} minutes")
+    _echo(f"Scheduled: {len(summary.scheduled)}")
     for job in summary.scheduled:
-        typer.echo(f"- {job.command}: {job.reason}")
+        _echo(f"- {job.command}: {job.reason}")
     if summary.skipped:
-        typer.echo("Skipped:")
+        _echo("Skipped:")
         for item in summary.skipped:
-            typer.echo(f"- {item}")
+            _echo(f"- {item}")
     if execute:
-        typer.echo(f"Executed: {len(summary.executed)}")
+        _echo(f"Executed: {len(summary.executed)}")
         for item in summary.executed:
             if item.output_ref:
-                typer.echo(f"- {item.command}: {item.status} -> {item.output_ref}")
+                _echo(f"- {item.command}: {item.status} -> {item.output_ref}")
             else:
-                typer.echo(f"- {item.command}: {item.status}")
+                _echo(f"- {item.command}: {item.status}")
 
 
 @external_app.command("answer")
@@ -1503,9 +1508,9 @@ def external_answer(
         )
     )
     if not result.ok:
-        typer.echo(result.message)
+        _echo(result.message)
         raise typer.Exit(1)
-    typer.echo(result.output["answer"])
+    _echo(result.output["answer"])
 
 
 def _build_core(settings) -> SegretarioCore:
@@ -1619,3 +1624,4 @@ def _ollama_status(base_url: str) -> str:
         return "reachable" if response.status_code < 500 else "unreachable"
     except Exception:
         return "unreachable"
+
