@@ -112,13 +112,26 @@ def _raw_plan_items(
 def _processed_raw_sources(vault: Path) -> set[str]:
     sources: set[str] = set()
     knowledge = vault / "knowledge"
-    if not knowledge.exists():
-        return sources
-    for page in sorted(knowledge.rglob("*.md")):
-        metadata, _body = parse_frontmatter(page.read_text(encoding="utf-8", errors="replace"))
-        source_path = metadata.get("source_path")
-        if isinstance(source_path, str) and source_path.strip():
-            sources.add(source_path.strip().replace("\\", "/"))
+    if knowledge.exists():
+        for page in sorted(knowledge.rglob("*.md")):
+            metadata, _body = parse_frontmatter(page.read_text(encoding="utf-8", errors="replace"))
+            source_path = metadata.get("source_path")
+            if isinstance(source_path, str) and source_path.strip():
+                sources.add(source_path.strip().replace("\\", "/"))
+
+    log_path = vault / "meta" / "log.md"
+    if log_path.exists():
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        sources.update(_processed_raw_sources_from_log(log_text))
+    return sources
+
+
+def _processed_raw_sources_from_log(log_text: str) -> set[str]:
+    sources: set[str] = set()
+    for match in re.finditer(r"\bingest\s+(raw/[^\r\n]+?)\s+->\s+knowledge/", log_text):
+        sources.add(match.group(1).strip().replace("\\", "/"))
+    for match in re.finditer(r"\bingest_missing\s+\|\s+(raw/[^\r\n]+)", log_text):
+        sources.add(match.group(1).strip().replace("\\", "/"))
     return sources
 
 

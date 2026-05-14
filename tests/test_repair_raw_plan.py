@@ -52,6 +52,22 @@ def test_repair_raw_plan_skips_sources_already_referenced_by_knowledge(tmp_path:
     assert "- raw/articles/new.txt -> ingest_candidate: markdown/text source" in rendered
 
 
+def test_repair_raw_plan_skips_sources_already_recorded_in_log(tmp_path: Path):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "old.md").write_text("# Old\n", encoding="utf-8")
+    (vault / "raw" / "articles" / "new.md").write_text("# New\n", encoding="utf-8")
+    (vault / "meta" / "log.md").write_text(
+        "# Log\n- 2026-05-14 ingest raw/articles/old.md -> knowledge/old.md\n",
+        encoding="utf-8",
+    )
+
+    report = repair_raw_plan(vault, today=date(2026, 5, 14), skip_paths=["raw/elaborati"])
+
+    rendered = "\n".join(report.items)
+    assert "raw/articles/old.md" not in rendered
+    assert "- raw/articles/new.md -> ingest_candidate: markdown/text source" in rendered
+
+
 def test_repair_raw_plan_cli_routes_through_core_taskboard_and_audit(tmp_path: Path, monkeypatch):
     vault = _make_vault(tmp_path)
     (vault / "raw" / "articles" / "public.md").write_text("# Public\n", encoding="utf-8")
