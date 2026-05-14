@@ -104,6 +104,8 @@ def _find_suggestions(
     seen_suggestions: set[str] = set()
 
     for page in pages:
+        if _is_append_only_source(page.relative_path):
+            continue
         if normalized_scope is not None and not _is_within_scope(
             page.relative_path,
             normalized_scope,
@@ -141,6 +143,10 @@ def _normalize_source_scope(source_scope: str | None) -> str | None:
 
 def _is_within_scope(relative_path: str, scope: str) -> bool:
     return relative_path == scope or relative_path.startswith(f"{scope}/")
+
+
+def _is_append_only_source(relative_path: str) -> bool:
+    return relative_path == "meta/log.md"
 
 
 def _collect_pages(

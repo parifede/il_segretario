@@ -155,6 +155,36 @@ def test_relink_apply_respects_output_scope(tmp_path: Path):
     assert "Recent [[Log]] entries." in digest.read_text(encoding="utf-8")
 
 
+def test_relink_dry_run_excludes_append_only_log_as_source(tmp_path: Path):
+    vault = tmp_path / "vault"
+    log = vault / "meta" / "log.md"
+    bookmarks = vault / "meta" / "bookmarks.md"
+    log.parent.mkdir(parents=True)
+    log.write_text("# Log\n\nBookmarks mentioned in old entries.\n", encoding="utf-8")
+    bookmarks.write_text("# Bookmarks\n\nLog mentioned here.\n", encoding="utf-8")
+
+    report = relink_dry_run(vault, today=date(2026, 5, 12))
+
+    assert "meta/log.md -> [[Bookmarks]]" not in report.suggestions
+    assert "meta/bookmarks.md -> [[Log]]" in report.suggestions
+    assert "Bookmarks mentioned" in log.read_text(encoding="utf-8")
+
+
+def test_relink_apply_never_rewrites_append_only_log(tmp_path: Path):
+    vault = tmp_path / "vault"
+    log = vault / "meta" / "log.md"
+    bookmarks = vault / "meta" / "bookmarks.md"
+    log.parent.mkdir(parents=True)
+    log.write_text("# Log\n\nBookmarks mentioned in old entries.\n", encoding="utf-8")
+    bookmarks.write_text("# Bookmarks\n\nLog mentioned here.\n", encoding="utf-8")
+    before = log.read_text(encoding="utf-8")
+
+    report = relink_apply(vault, today=date(2026, 5, 12))
+
+    assert "meta/log.md -> [[Bookmarks]]" not in report.suggestions
+    assert log.read_text(encoding="utf-8") == before
+
+
 def test_relink_apply_cli_routes_through_core_and_writes_pages(
     tmp_path: Path,
     monkeypatch,
