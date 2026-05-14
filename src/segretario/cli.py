@@ -8,6 +8,7 @@ import typer
 import yaml
 
 from segretario.agents.calendar_agent import CalendarAgent
+from segretario.agents.extraction_agent import ExtractionAgent
 from segretario.agents.ingest_agent import ConfirmationNeededError
 from segretario.agents.ingest_agent import IngestAgent
 from segretario.agents.mail_agent import MailAgent
@@ -47,6 +48,7 @@ audit_app = typer.Typer(help="Audit commands.")
 task_app = typer.Typer(help="Single task commands.")
 agents_app = typer.Typer(help="Agent worker commands.")
 repair_app = typer.Typer(help="Vault repair commands.")
+extract_app = typer.Typer(help="Rich source extraction planning commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -60,6 +62,7 @@ app.add_typer(audit_app, name="audit")
 app.add_typer(task_app, name="task")
 app.add_typer(agents_app, name="agents")
 app.add_typer(repair_app, name="repair")
+app.add_typer(extract_app, name="extract")
 
 
 def _echo(message: object = "", *, debug: bool = False) -> None:
@@ -1041,6 +1044,51 @@ def repair_raw_queue_command(
         _echo(f"- {task_id}: {source_path}")
 
 
+@extract_app.command("plan")
+def extract_plan_command(
+    limit: int = typer.Option(
+        80,
+        "--limit",
+        min=0,
+        help="Maximum number of plan entries to print; full report is always written.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Plan safe local extraction for unsupported raw files."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="extract.plan",
+            payload={
+                "vault_path": settings.vault.path,
+                "action": "extract.plan",
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action="output.write",
+        )
+    )
+    if not result.ok:
+        _echo(result.message)
+        raise typer.Exit(1)
+    report = result.output or {}
+    _echo(f"Extract plan: {report['report_path']}")
+    items = report["items"]
+    if items:
+        for item in items[:limit]:
+            _echo(item)
+        remaining = len(items) - limit
+        if remaining > 0:
+            _echo(f"- ... {remaining} more entries in report")
+    else:
+        _echo("- no extraction planning needed")
+
+
 def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
     candidates: list[str] = []
     for item in items:
@@ -1790,6 +1838,7 @@ def _agent_command_map():
         "repair.index.dry_run": MaintenanceAgent(),
         "repair.index.apply": MaintenanceAgent(),
         "repair.raw_plan": MaintenanceAgent(),
+        "extract.plan": ExtractionAgent(),
         "ingest": IngestAgent(),
         "link": ResearchAgent(),
         "web": ResearchAgent(),

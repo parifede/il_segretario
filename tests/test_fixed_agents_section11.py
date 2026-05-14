@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from segretario.agents.calendar_agent import CalendarAgent
+from segretario.agents.extraction_agent import ExtractionAgent
 from segretario.agents.ingest_agent import IngestAgent
 from segretario.agents.mail_agent import MailAgent
 from segretario.agents.maintenance_agent import MaintenanceAgent
@@ -51,6 +52,7 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
             },
             {"MarkdownTool", "SearchTool", "VaultTool"},
         ),
+        ExtractionAgent: ({"extract.plan"}, {"ExtractorTool", "VaultTool"}),
         SecurityAgent: (
             {"classify_path", "security.path", "knowledge.export", "web.query", "external.answer"},
             {"SecurityPolicy", "OutputGuard"},
