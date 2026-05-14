@@ -14,6 +14,8 @@ class CalendarAgent(BaseAgent):
             "calendar.schedule",
             "calendar.modify",
             "calendar.delete",
+            "calendar.accept",
+            "calendar.decline",
         }
     )
     allowed_tools = frozenset({"CalendarTool"})
@@ -54,6 +56,18 @@ class CalendarAgent(BaseAgent):
 
         if action == "calendar.delete":
             return tool.delete_event(event_ref=str(payload["event_ref"]))
+
+        if action == "calendar.accept":
+            return tool.respond_to_invitation(
+                event_ref=str(payload["event_ref"]),
+                response="accepted",
+            )
+
+        if action == "calendar.decline":
+            return tool.respond_to_invitation(
+                event_ref=str(payload["event_ref"]),
+                response="declined",
+            )
 
         raise ValueError(f"unsupported calendar action: {action}")
 

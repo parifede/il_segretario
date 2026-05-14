@@ -114,6 +114,20 @@ class CalendarTool:
             return self.calendar_client.delete_event(event_ref=event_ref)
         raise ValueError(f"unknown calendar event: {event_ref}")
 
+    def respond_to_invitation(self, *, event_ref: str, response: str) -> dict[str, object]:
+        events = _read_events(self.events_path)
+        for event in events:
+            if str(event.get("id", "")) == event_ref:
+                event["response"] = response
+                event["responded_at"] = datetime.now(UTC).isoformat()
+                self.state_dir.mkdir(parents=True, exist_ok=True)
+                self.events_path.write_text(
+                    json.dumps(events, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                return event
+        raise ValueError(f"unknown calendar event: {event_ref}")
+
 
 def _read_events(path: Path) -> list[dict[str, object]]:
     if not path.exists():

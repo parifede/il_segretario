@@ -43,6 +43,8 @@ def test_calendar_mutations_require_confirmation():
         PermissionKernel.CALENDAR_MODIFY,
         PermissionKernel.CALENDAR_DELETE,
         PermissionKernel.CALENDAR_CREATE_WITH_ATTENDEES,
+        PermissionKernel.CALENDAR_ACCEPT,
+        PermissionKernel.CALENDAR_DECLINE,
     ):
         assert PermissionKernel.decision_for(action) == PermissionDecision.CONFIRM
 

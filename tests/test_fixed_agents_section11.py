@@ -34,6 +34,8 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
                 "calendar.schedule",
                 "calendar.modify",
                 "calendar.delete",
+                "calendar.accept",
+                "calendar.decline",
             },
             {"CalendarTool"},
         ),

@@ -1236,6 +1236,54 @@ def calendar_delete(
     raise typer.Exit(0 if result.ok else 1)
 
 
+@calendar_app.command("accept")
+def calendar_accept(
+    event_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for accepting a calendar invitation."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.accept",
+            payload={**_google_payload(settings), "event_ref": event_ref},
+            risk="high",
+            action=PermissionKernel.CALENDAR_ACCEPT,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@calendar_app.command("decline")
+def calendar_decline(
+    event_ref: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Create a confirmation task for declining a calendar invitation."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="calendar.decline",
+            payload={**_google_payload(settings), "event_ref": event_ref},
+            risk="high",
+            action=PermissionKernel.CALENDAR_DECLINE,
+        )
+    )
+    typer.echo(result.message)
+    raise typer.Exit(0 if result.ok else 1)
+
+
 @app.command("run-maintenance")
 def run_maintenance(
     config: Path | None = typer.Option(
@@ -1406,6 +1454,8 @@ def _agent_command_map():
         "calendar.schedule": CalendarAgent(),
         "calendar.modify": CalendarAgent(),
         "calendar.delete": CalendarAgent(),
+        "calendar.accept": CalendarAgent(),
+        "calendar.decline": CalendarAgent(),
         "external.answer": SecurityAgent(),
     }
 

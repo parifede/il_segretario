@@ -31,6 +31,8 @@ class PermissionKernel:
     CALENDAR_CREATE_WITH_ATTENDEES = "calendar.create_with_attendees"
     CALENDAR_MODIFY = "calendar.modify"
     CALENDAR_DELETE = "calendar.delete"
+    CALENDAR_ACCEPT = "calendar.accept"
+    CALENDAR_DECLINE = "calendar.decline"
     WEB_PUBLIC_QUERY = "web.public_query"
     WEB_PRIVATE_CONTEXT_QUERY = "web.private_context_query"
     EXTERNAL_ANSWER = "external.answer"
@@ -73,6 +75,8 @@ class PermissionKernel:
             CALENDAR_CREATE_WITH_ATTENDEES,
             CALENDAR_MODIFY,
             CALENDAR_DELETE,
+            CALENDAR_ACCEPT,
+            CALENDAR_DECLINE,
             SELF_PROFILE_WRITE,
             SELF_INTERESTS_WRITE,
             SELF_CHARACTER_WRITE,
