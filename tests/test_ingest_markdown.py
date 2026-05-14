@@ -162,6 +162,35 @@ def test_ingest_updates_existing_knowledge_page_without_duplicate_index_or_log_h
     )
     index = (vault / "meta" / "index.md").read_text(encoding="utf-8")
     assert index.count("- [[Source Topic]]") == 1
+
+
+def test_ingest_markdown_accepts_safe_markdown_under_raw_root(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "meta" / "index.md").write_text("# Index\n\n## Knowledge\n", encoding="utf-8")
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    source = vault / "raw" / "operations-note.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("# Operations Note\n\nIndependent note.\n", encoding="utf-8")
+
+    result = ingest_article(vault, "raw/operations-note.md", auto=True)
+
+    assert result.path == "knowledge/operations-note.md"
+    written = (vault / "knowledge" / "operations-note.md").read_text(encoding="utf-8")
+    assert "source_path: raw/operations-note.md\n" in written
+
+
+def test_ingest_markdown_rejects_raw_elaborati_archive(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "meta" / "index.md").write_text("# Index\n\n## Knowledge\n", encoding="utf-8")
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    source = vault / "raw" / "elaborati" / "old.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("# Old\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="ingest source must be under raw and outside skipped paths"):
+        ingest_article(vault, "raw/elaborati/old.md", auto=True)
     log = (vault / "meta" / "log.md").read_text(encoding="utf-8")
     assert log.count("# Log\n") == 1
 

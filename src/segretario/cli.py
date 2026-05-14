@@ -31,6 +31,7 @@ from segretario.taskboard import TaskboardStore
 from segretario.taskboard import TaskStatus
 from segretario.taskboard.payloads import TaskPayloadStore
 from segretario.tools.ollama_tool import build_local_llm
+from segretario.vault.repair import repair_raw_plan as build_repair_raw_plan
 
 app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(help="Configuration commands.")
@@ -935,6 +936,78 @@ def repair_raw_plan_command(
             _echo(f"- ... {remaining} more entries in report")
     else:
         _echo("- no raw planning needed")
+
+
+@repair_app.command("raw-queue")
+def repair_raw_queue_command(
+    limit: int = typer.Option(
+        5,
+        "--limit",
+        min=0,
+        help="Maximum number of ingest_candidate raw files to queue.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Queue safe ingest tasks from the raw repair plan without executing them."""
+    settings = load_settings(config_path=config)
+    plan = build_repair_raw_plan(settings.vault.path, skip_paths=settings.vault.skip_paths)
+    candidates = _raw_plan_ingest_candidates(plan.items)[:limit]
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    queued: list[tuple[int, str]] = []
+    for source_path in candidates:
+        request = TaskRequest(
+            command="ingest",
+            payload={
+                "vault_path": settings.vault.path,
+                "source_path": source_path,
+                "auto": True,
+            },
+            risk="low",
+            action=PermissionKernel.KNOWLEDGE_WRITE,
+            source="repair",
+            requested_by="segretario",
+        )
+        task = taskboard.create_task(
+            source="repair",
+            requested_by="segretario",
+            command="ingest",
+            risk="low",
+            assigned_agent="agent-runner",
+            input_ref="pending",
+        )
+        payload_ref = payload_store.save(int(task["id"]), request)
+        taskboard.update_input_ref(int(task["id"]), payload_ref)
+        audit.append_event(
+            "repair.raw_ingest_queued",
+            {"task_id": task["id"], "source_path": source_path},
+        )
+        queued.append((int(task["id"]), source_path))
+
+    _echo(f"Queued ingest tasks: {len(queued)}")
+    for task_id, source_path in queued:
+        _echo(f"- {task_id}: {source_path}")
+
+
+def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
+    candidates: list[str] = []
+    for item in items:
+        if " -> ingest_candidate:" not in item:
+            continue
+        source = item.removeprefix("- ").split(" -> ", 1)[0].strip()
+        if source:
+            candidates.append(source)
+    return candidates
 
 
 @app.command()

@@ -89,6 +89,35 @@ def test_repair_raw_plan_cli_limits_user_output_while_report_stays_complete(
     assert "raw/articles/second.md" in report.read_text(encoding="utf-8")
 
 
+def test_repair_raw_queue_creates_executable_ingest_tasks_only_for_candidates(
+    tmp_path: Path,
+    monkeypatch,
+):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "first.md").write_text("# First\n", encoding="utf-8")
+    (vault / "raw" / "telegram").mkdir()
+    (vault / "raw" / "telegram" / "chat.md").write_text("# Chat\n", encoding="utf-8")
+    (vault / "raw" / "books").mkdir()
+    (vault / "raw" / "books" / "book.pdf").write_bytes(b"%PDF")
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    queued = CliRunner().invoke(app, ["repair", "raw-queue", "--limit", "5"])
+    run = CliRunner().invoke(app, ["agents", "run-once"])
+
+    assert queued.exit_code == 0
+    assert "Queued ingest tasks: 1" in queued.output
+    assert "raw/articles/first.md" in queued.output
+    assert "raw/telegram/chat.md" not in queued.output
+    assert run.exit_code == 0
+    assert "ingest completed -> knowledge/first.md" in run.output
+    assert "- [[First]]" in (vault / "meta" / "index.md").read_text(encoding="utf-8")
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    rows = db.execute("select command, status from tasks order by id").fetchall()
+    assert rows == [("ingest", "completed")]
+    assert _audit(tmp_path).verify() is True
+
+
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     (vault / "knowledge").mkdir(parents=True)

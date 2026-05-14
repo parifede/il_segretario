@@ -9,6 +9,7 @@ import yaml
 
 from segretario.vault.frontmatter import parse_frontmatter, render_frontmatter
 from segretario.vault.index_log import KNOWLEDGE_HEADING, append_log, ensure_meta_index
+from segretario.vault.paths import classify_vault_path
 
 
 class ConfirmationNeededError(Exception):
@@ -85,8 +86,8 @@ def _normalize_source(source_path: Path | str) -> str:
     parts = tuple(Path(relative).parts)
     if ".." in parts:
         raise ValueError("source path cannot contain parent traversal")
-    if parts[:2] != ("raw", "articles"):
-        raise ValueError("ingest source must be under raw/articles")
+    if parts[:1] != ("raw",) or classify_vault_path(relative).skip:
+        raise ValueError("ingest source must be under raw and outside skipped paths")
     if Path(relative).suffix.lower() not in {".md", ".txt"}:
         raise ValueError("ingest source must be markdown or text")
     return relative
