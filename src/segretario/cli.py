@@ -586,6 +586,7 @@ def _run_queued_task(settings, task_id: int) -> None:
         max_retries = (
             1
             if str(task.get("risk", "")).lower() in {"high", "critical"}
+            or str(task.get("command", "")).startswith("extract.")
             else settings.taskboard.max_retries
         )
         taskboard.record_failure(
@@ -667,6 +668,7 @@ def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
         max_retries = (
             1
             if str(task.get("risk", "")).lower() in {"high", "critical"}
+            or command.startswith("extract.")
             else settings.taskboard.max_retries
         )
         taskboard.record_failure(

@@ -185,7 +185,7 @@ def _require_inside(root: Path, candidate: Path) -> None:
 
 
 def _extract_text_from_pdf_bytes(data: bytes) -> str:
-    chunks = [_decode_pdf_strings(data)]
+    chunks: list[str] = []
     for stream in _pdf_streams(data):
         chunks.append(_decode_pdf_strings(stream))
     lines = []
@@ -204,30 +204,186 @@ def _extract_text_from_pdf_bytes(data: bytes) -> str:
 
 def _pdf_streams(data: bytes) -> list[bytes]:
     streams: list[bytes] = []
-    for match in re.finditer(rb"(?P<header><<.*?>>)\s*stream\r?\n(?P<body>.*?)\r?\nendstream", data, re.S):
-        header = match.group("header")
-        body = match.group("body")
+    start = 0
+    while True:
+        stream_index = data.find(b"stream", start)
+        if stream_index < 0:
+            break
+        body_start = stream_index + len(b"stream")
+        if data[body_start : body_start + 2] == b"\r\n":
+            body_start += 2
+        elif data[body_start : body_start + 1] in {b"\n", b"\r"}:
+            body_start += 1
+        end_index = data.find(b"endstream", body_start)
+        if end_index < 0:
+            break
+        header_start = max(0, stream_index - 4096)
+        header = data[header_start:stream_index]
+        body = data[body_start:end_index].strip(b"\r\n")
+        start = end_index + len(b"endstream")
+        if len(body) > 5 * 1024 * 1024:
+            continue
         if b"/FlateDecode" in header:
             try:
                 body = zlib.decompress(body)
             except zlib.error:
                 continue
+        if len(body) > 5 * 1024 * 1024:
+            continue
         streams.append(body)
     return streams
 
 
 def _decode_pdf_strings(data: bytes) -> str:
     text: list[str] = []
-    for raw in re.findall(rb"\((?:\\.|[^\\)])*\)\s*Tj", data, re.S):
-        text.append(_decode_pdf_literal(raw[1 : raw.rfind(b")")]))
-    for raw in re.findall(rb"<([0-9A-Fa-f\s]+)>\s*Tj", data):
-        text.append(_decode_pdf_hex(raw))
-    for array in re.findall(rb"\[(.*?)\]\s*TJ", data, re.S):
-        for literal in re.findall(rb"\((?:\\.|[^\\)])*\)", array, re.S):
-            text.append(_decode_pdf_literal(literal[1:-1]))
-        for hex_text in re.findall(rb"<([0-9A-Fa-f\s]+)>", array):
+    for operator in _operator_positions(data, b"Tj"):
+        operand = _operand_window(data, operator)
+        literal = _last_literal_operand(operand)
+        if literal is not None:
+            text.append(_decode_pdf_literal(literal))
+            continue
+        hex_text = _last_hex_operand(operand)
+        if hex_text is not None:
             text.append(_decode_pdf_hex(hex_text))
+    for operator in _operator_positions(data, b"TJ"):
+        operand = _operand_window(data, operator)
+        array = _last_array_operand(operand)
+        if array is None:
+            continue
+        for kind, value in _array_text_operands(array):
+            text.append(_decode_pdf_literal(value) if kind == "literal" else _decode_pdf_hex(value))
     return "\n".join(part for part in text if part.strip())
+
+
+def _operator_positions(data: bytes, operator: bytes):
+    start = 0
+    while True:
+        index = data.find(operator, start)
+        if index < 0:
+            return
+        before = data[index - 1 : index] if index else b" "
+        after = data[index + len(operator) : index + len(operator) + 1]
+        if _is_pdf_boundary(before) and _is_pdf_boundary(after):
+            yield index
+        start = index + len(operator)
+
+
+def _is_pdf_boundary(value: bytes) -> bool:
+    return not value or value in b"\x00\t\n\f\r []<>()/"
+
+
+def _operand_window(data: bytes, operator_index: int) -> bytes:
+    return data[max(0, operator_index - 8192) : operator_index]
+
+
+def _last_literal_operand(data: bytes) -> bytes | None:
+    end = _find_last_unescaped(data, ord(")"))
+    if end is None:
+        return None
+    start = _matching_literal_start(data, end)
+    if start is None:
+        return None
+    return data[start + 1 : end]
+
+
+def _find_last_unescaped(data: bytes, char: int) -> int | None:
+    index = len(data) - 1
+    while index >= 0:
+        if data[index] == char and _backslash_count(data, index) % 2 == 0:
+            return index
+        index -= 1
+    return None
+
+
+def _backslash_count(data: bytes, index: int) -> int:
+    count = 0
+    index -= 1
+    while index >= 0 and data[index] == 92:
+        count += 1
+        index -= 1
+    return count
+
+
+def _matching_literal_start(data: bytes, end: int) -> int | None:
+    depth = 0
+    index = end
+    while index >= 0:
+        char = data[index]
+        if _backslash_count(data, index) % 2:
+            index -= 1
+            continue
+        if char == ord(")"):
+            depth += 1
+        elif char == ord("("):
+            depth -= 1
+            if depth == 0:
+                return index
+        index -= 1
+    return None
+
+
+def _last_hex_operand(data: bytes) -> bytes | None:
+    end = data.rfind(b">")
+    if end < 0:
+        return None
+    start = data.rfind(b"<", 0, end)
+    if start < 0 or data[start : start + 2] == b"<<":
+        return None
+    candidate = data[start + 1 : end]
+    return candidate if re.fullmatch(rb"[0-9A-Fa-f\s]+", candidate) else None
+
+
+def _last_array_operand(data: bytes) -> bytes | None:
+    end = data.rfind(b"]")
+    if end < 0:
+        return None
+    start = data.rfind(b"[", 0, end)
+    if start < 0:
+        return None
+    return data[start + 1 : end]
+
+
+def _array_text_operands(array: bytes) -> list[tuple[str, bytes]]:
+    operands: list[tuple[str, bytes]] = []
+    index = 0
+    while index < len(array):
+        char = array[index]
+        if char == ord("("):
+            end = _literal_end(array, index)
+            if end is None:
+                break
+            operands.append(("literal", array[index + 1 : end]))
+            index = end + 1
+            continue
+        if char == ord("<") and array[index : index + 2] != b"<<":
+            end = array.find(b">", index + 1)
+            if end < 0:
+                break
+            candidate = array[index + 1 : end]
+            if re.fullmatch(rb"[0-9A-Fa-f\s]+", candidate):
+                operands.append(("hex", candidate))
+            index = end + 1
+            continue
+        index += 1
+    return operands
+
+
+def _literal_end(data: bytes, start: int) -> int | None:
+    depth = 1
+    index = start + 1
+    while index < len(data):
+        char = data[index]
+        if _backslash_count(data, index) % 2:
+            index += 1
+            continue
+        if char == ord("("):
+            depth += 1
+        elif char == ord(")"):
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
 
 
 def _decode_pdf_literal(raw: bytes) -> str:

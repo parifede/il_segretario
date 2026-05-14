@@ -169,6 +169,9 @@ def test_agents_run_revalidates_tampered_extract_payload_skip_path(tmp_path: Pat
     assert "extract.pdf failed" in result.output
     assert not (vault / "raw" / "extracted").exists()
     assert "SECRET" not in result.output
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    status = db.execute("select status from tasks where id = 1").fetchone()[0]
+    assert status == "failed"
     assert _audit(tmp_path).verify() is True
 
 
