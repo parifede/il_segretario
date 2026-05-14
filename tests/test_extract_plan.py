@@ -182,6 +182,7 @@ def test_ocr_queue_runs_needs_ocr_items_and_fails_cleanly_without_tesseract(
     config = _write_config(tmp_path, vault)
     monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
     monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("TESSERACT_CMD", raising=False)
     runner = CliRunner()
 
     queued = runner.invoke(app, ["ocr", "queue", "--limit", "1"])
