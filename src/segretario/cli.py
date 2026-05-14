@@ -120,6 +120,73 @@ def status(
     _echo("\n".join(lines))
 
 
+@app.command()
+def start(
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Open the local operator console with the current actionable state."""
+    settings = load_settings(config_path=config)
+    for line in _start_lines(settings):
+        _echo(line)
+
+
+@app.command()
+def work(
+    limit: int = typer.Option(
+        3,
+        "--limit",
+        min=0,
+        help="Maximum extract/OCR tasks to queue and run per stage.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Run a bounded local work cycle without manual taskboard juggling."""
+    settings = load_settings(config_path=config)
+    _run_work_cycle(settings, limit=limit)
+
+
+@app.command()
+def chat(
+    once: str | None = typer.Option(
+        None,
+        "--once",
+        help="Handle one instruction and exit; omit for an interactive loop.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Interact with the local Segretario command layer."""
+    settings = load_settings(config_path=config)
+    if once is not None:
+        _handle_chat_instruction(settings, once)
+        return
+
+    _echo("Segretario chat. Type 'exit' to stop.")
+    while True:
+        try:
+            instruction = typer.prompt("segretario")
+        except (EOFError, KeyboardInterrupt):
+            _echo("")
+            return
+        if instruction.strip().casefold() in {"exit", "quit", "q"}:
+            return
+        _handle_chat_instruction(settings, instruction)
+
+
 @config_app.command("show")
 def config_show(
     config: Path | None = typer.Option(
@@ -532,12 +599,7 @@ def agents_run(
 ) -> None:
     """Let fixed agents claim and execute a bounded batch of queued tasks."""
     settings = load_settings(config_path=config)
-    executed: list[tuple[int, str, str, str | None]] = []
-    for _ in range(limit):
-        result = _run_one_agent_task(settings)
-        if result is None:
-            break
-        executed.append(result)
+    executed = _run_agent_batch(settings, limit=limit)
 
     _echo(f"Executed: {len(executed)}")
     if not executed:
@@ -634,6 +696,130 @@ def _latest_waiting_task_id(taskboard: TaskboardStore, command: str) -> int:
     raise ValueError(f"no waiting confirmation task found for {command}")
 
 
+def _start_lines(settings) -> list[str]:
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    pending = taskboard.list_tasks(limit=100, status=TaskStatus.QUEUED.value)
+    waiting = taskboard.list_tasks(limit=100, status=TaskStatus.WAITING_CONFIRMATION.value)
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    vault_ok = settings.vault.path.is_dir()
+    audit_ok = audit.verify()
+    next_step = "run `segretario work --limit 3`"
+    if waiting:
+        next_step = "review waiting confirmations with `segretario tasks --status waiting_confirmation`"
+    elif pending:
+        next_step = "run queued work with `segretario agents run --limit 3`"
+    return [
+        "Segretario ready",
+        f"Project: {settings.project_name}",
+        f"Vault: {'ok' if vault_ok else 'missing'}",
+        f"Audit: {'ok' if audit_ok else 'failed'}",
+        f"Pending tasks: {len(pending)}",
+        f"Waiting confirmations: {len(waiting)}",
+        f"Next: {next_step}",
+    ]
+
+
+def _handle_chat_instruction(settings, instruction: str) -> None:
+    text = instruction.strip()
+    lowered = text.casefold()
+    if not text:
+        _echo("No instruction.")
+        return
+    if lowered in {"start", "status"}:
+        for line in _start_lines(settings):
+            _echo(line)
+        return
+    if lowered == "tasks":
+        for line in _task_list_lines(settings, limit=10):
+            _echo(line)
+        return
+    if lowered == "work":
+        _run_work_cycle(settings, limit=3)
+        return
+    if lowered.startswith("search "):
+        _print_search_results(settings, text[7:].strip())
+        return
+    if lowered.startswith("query "):
+        llm = build_local_llm(settings.llm)
+        try:
+            result = query_vault(settings.vault.path, text[6:].strip(), llm=llm)
+        except Exception as exc:
+            _echo(str(exc))
+            return
+        _echo(result.answer)
+        return
+    _echo("Supported: start, status, tasks, work, search <text>, query <question>, exit")
+
+
+def _print_search_results(settings, query_text: str) -> None:
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="search",
+            payload={
+                "vault_path": settings.vault.path,
+                "query": query_text,
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action="vault.search",
+        )
+    )
+    if not result.ok:
+        _echo(result.message)
+        return
+    results = result.output
+    if not results:
+        _echo("No matches found.")
+        return
+    for item in results:
+        _echo(f"{item['path']}:{item['line']}: {item['snippet']}")
+
+
+def _task_list_lines(settings, *, limit: int) -> list[str]:
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    rows = taskboard.list_tasks(limit=limit)
+    if not rows:
+        return ["No tasks found."]
+    lines: list[str] = []
+    for task in rows:
+        reason = ""
+        if task["status"] in {"denied", "failed", "cancelled"}:
+            reason = task.get("last_error") or task.get("confirmation_reason") or ""
+        elif task["status"] != "completed":
+            reason = task.get("confirmation_reason") or task.get("last_error") or ""
+        suffix = f" - {reason}" if reason else ""
+        lines.append(f"{task['id']}: {task['command']} [{task['status']}] risk={task['risk']}{suffix}")
+    return lines
+
+
+def _run_work_cycle(settings, *, limit: int) -> None:
+    _echo("Work cycle")
+    extract_queued = _queue_extract_pdf_tasks(settings, limit=limit)
+    _echo(f"Queued extract tasks: {len(extract_queued)}")
+    for task_id, source_path in extract_queued:
+        _echo(f"- {task_id}: {source_path}")
+    extract_executed = _run_agent_batch(settings, limit=limit)
+    _echo(f"Executed extract tasks: {len(extract_executed)}")
+    for task_id, command, status, output_ref in extract_executed:
+        suffix = f" -> {output_ref}" if output_ref else ""
+        _echo(f"- {task_id}: {command} {status}{suffix}")
+
+    ocr_queued = _queue_ocr_tasks(settings, limit=limit)
+    _echo(f"Queued OCR tasks: {len(ocr_queued)}")
+    for task_id, marker_path in ocr_queued:
+        _echo(f"- {task_id}: {marker_path}")
+    ocr_executed = _run_agent_batch(settings, limit=limit)
+    _echo(f"Executed OCR tasks: {len(ocr_executed)}")
+    for task_id, command, status, output_ref in ocr_executed:
+        suffix = f" -> {output_ref}" if output_ref else ""
+        _echo(f"- {task_id}: {command} {status}{suffix}")
+
+
 def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -704,6 +890,16 @@ def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
         {"task_id": task_id, "command": request.command, "output": output_ref},
     )
     return task_id, request.command, "completed", output_ref
+
+
+def _run_agent_batch(settings, *, limit: int) -> list[tuple[int, str, str, str | None]]:
+    executed: list[tuple[int, str, str, str | None]] = []
+    for _ in range(limit):
+        result = _run_one_agent_task(settings)
+        if result is None:
+            break
+        executed.append(result)
+    return executed
 
 
 @app.command()
@@ -1119,6 +1315,13 @@ def extract_queue_command(
         _echo(f"unsupported extract kind: {kind}")
         raise typer.Exit(1)
     settings = load_settings(config_path=config)
+    queued = _queue_extract_pdf_tasks(settings, limit=limit)
+    _echo(f"Queued extract tasks: {len(queued)}")
+    for task_id, source_path in queued:
+        _echo(f"- {task_id}: {source_path}")
+
+
+def _queue_extract_pdf_tasks(settings, *, limit: int) -> list[tuple[int, str]]:
     plan = plan_extraction(settings.vault.path, skip_paths=settings.vault.skip_paths)
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
@@ -1126,7 +1329,7 @@ def extract_queue_command(
     active_sources = _active_sources_for_command(taskboard, payload_store, "extract.pdf")
     candidates = [
         source_path
-        for source_path in _extract_plan_candidates(plan.items, kind=kind)
+        for source_path in _extract_plan_candidates(plan.items, kind="pdf")
         if source_path not in active_sources
     ][:limit]
     audit = AuditLog(
@@ -1160,10 +1363,7 @@ def extract_queue_command(
         taskboard.update_input_ref(int(task["id"]), payload_ref)
         audit.append_event("extract.task_queued", {"task_id": task["id"], "source_path": source_path})
         queued.append((int(task["id"]), source_path))
-
-    _echo(f"Queued extract tasks: {len(queued)}")
-    for task_id, source_path in queued:
-        _echo(f"- {task_id}: {source_path}")
+    return queued
 
 
 @extract_app.command("pdf")
@@ -1215,6 +1415,13 @@ def ocr_queue_command(
 ) -> None:
     """Queue local OCR tasks for extracted PDF markers that need OCR."""
     settings = load_settings(config_path=config)
+    queued = _queue_ocr_tasks(settings, limit=limit)
+    _echo(f"Queued OCR tasks: {len(queued)}")
+    for task_id, marker_path in queued:
+        _echo(f"- {task_id}: {marker_path}")
+
+
+def _queue_ocr_tasks(settings, *, limit: int) -> list[tuple[int, str]]:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
     payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
@@ -1255,10 +1462,7 @@ def ocr_queue_command(
         taskboard.update_input_ref(int(task["id"]), payload_ref)
         audit.append_event("ocr.task_queued", {"task_id": task["id"], "marker_path": marker_path})
         queued.append((int(task["id"]), marker_path))
-
-    _echo(f"Queued OCR tasks: {len(queued)}")
-    for task_id, marker_path in queued:
-        _echo(f"- {task_id}: {marker_path}")
+    return queued
 
 
 def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:

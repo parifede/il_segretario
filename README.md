@@ -8,6 +8,7 @@ Local-first CLI custodian for an Obsidian-compatible LLM Wiki vault.
 cd E:\il_segretario
 uv sync
 uv run segretario status
+uv run segretario start
 ```
 
 Copy `segretario.yaml.example` to `segretario.yaml` when you want a local config, then point the vault to the real Obsidian folder:
@@ -25,6 +26,9 @@ Keep `segretario.yaml` as a local machine config and keep real vault metadata pr
 
 ```powershell
 uv run segretario status
+uv run segretario start
+uv run segretario chat --once "search topic"
+uv run segretario work --limit 3
 uv run segretario config show
 uv run segretario google status
 uv run segretario google login --force
@@ -80,6 +84,26 @@ Basic ingest for Phase 1:
 
 ```powershell
 uv run segretario ingest raw/articles/example.md --auto
+```
+
+Start the local operator console:
+
+```powershell
+uv run segretario start
+```
+
+Run one direct interaction without manually handling task IDs:
+
+```powershell
+uv run segretario chat --once "search privacy projection"
+uv run segretario chat --once "work"
+```
+
+Run a bounded local work cycle:
+
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+uv run segretario work --limit 3
 ```
 
 Fetch and ingest a public link for Phase 4:
