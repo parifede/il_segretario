@@ -9,7 +9,7 @@ from segretario.config.settings import Settings
 from segretario.policies.permissions import PermissionDecision, PermissionKernel
 from segretario.taskboard import TaskStatus, TaskboardStore
 from segretario.vault.health import lint_vault, vault_stats
-from segretario.vault.paths import classify_vault_path
+from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
 from segretario.vault.preflight import VaultPreflightReport, run_vault_preflight
 
 
@@ -279,20 +279,20 @@ def _scheduler_commands() -> set[str]:
 
 def _execute_command(command: str, settings: Settings) -> str:
     if command == "watch.raw":
-        return _write_raw_watch(settings.vault.path)
+        return _write_raw_watch(settings)
     if command == "watch.inbox":
         return _write_inbox_watch(settings)
     if command == "daily.digest":
-        return _write_daily_digest(settings.vault.path)
+        return _write_daily_digest(settings)
     if command == "weekly.lint":
-        return _write_weekly_lint(settings.vault.path)
+        return _write_weekly_lint(settings)
     if command == "periodic.stats":
-        return _write_periodic_stats(settings.vault.path)
+        return _write_periodic_stats(settings)
     if command == "bookmark.review":
-        return _write_bookmark_review(settings.vault.path)
+        return _write_bookmark_review(settings)
     if command == "stale_stub.review":
         return _write_filtered_lint_review(
-            settings.vault.path,
+            settings,
             relative_report="output/stale-stub-review.md",
             title="Stale Stub Review",
             needle="stale stub",
@@ -300,19 +300,19 @@ def _execute_command(command: str, settings: Settings) -> str:
         )
     if command == "orphan_page.review":
         return _write_filtered_lint_review(
-            settings.vault.path,
+            settings,
             relative_report="output/orphan-page-review.md",
             title="Orphan Page Review",
             needle="orphan",
             empty_message="no orphan pages found",
         )
     if command == "maintenance.cycle":
-        return _write_maintenance_cycle(settings.vault.path)
+        return _write_maintenance_cycle(settings)
     raise ValueError(f"unsupported scheduler task: {command}")
 
 
-def _write_raw_watch(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
+def _write_raw_watch(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
     raw_dir = vault / "raw"
     candidates: list[str] = []
     if raw_dir.exists():
@@ -320,7 +320,7 @@ def _write_raw_watch(vault_path: str | Path) -> str:
             if not path.is_file():
                 continue
             relative = path.relative_to(vault).as_posix()
-            if classify_vault_path(relative).skip:
+            if _should_skip(relative, settings):
                 continue
             candidates.append(relative)
 
@@ -346,7 +346,7 @@ def _write_inbox_watch(settings: Settings) -> str:
             if not path.is_file():
                 continue
             relative = path.relative_to(vault).as_posix()
-            if classify_vault_path(relative).skip:
+            if _should_skip(relative, settings):
                 continue
             candidates.append(relative)
 
@@ -363,9 +363,9 @@ def _write_inbox_watch(settings: Settings) -> str:
     return relative_report
 
 
-def _write_daily_digest(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
-    stats = vault_stats(vault)
+def _write_daily_digest(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
+    stats = vault_stats(vault, skip_paths=settings.vault.skip_paths)
     recent_log = _tail_lines(vault / "meta" / "log.md", limit=10)
     relative_report = "output/daily-digest.md"
     report_path = vault / relative_report
@@ -384,10 +384,10 @@ def _write_daily_digest(vault_path: str | Path) -> str:
     return relative_report
 
 
-def _write_maintenance_cycle(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
-    stats = vault_stats(vault)
-    lint = lint_vault(vault)
+def _write_maintenance_cycle(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
+    stats = vault_stats(vault, skip_paths=settings.vault.skip_paths)
+    lint = lint_vault(vault, skip_paths=settings.vault.skip_paths)
     relative_report = "output/maintenance-cycle.md"
     report_path = vault / relative_report
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -403,9 +403,9 @@ def _write_maintenance_cycle(vault_path: str | Path) -> str:
     return relative_report
 
 
-def _write_weekly_lint(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
-    lint = lint_vault(vault)
+def _write_weekly_lint(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
+    lint = lint_vault(vault, skip_paths=settings.vault.skip_paths)
     relative_report = "output/weekly-lint.md"
     report_path = vault / relative_report
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -419,9 +419,9 @@ def _write_weekly_lint(vault_path: str | Path) -> str:
     return relative_report
 
 
-def _write_periodic_stats(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
-    stats = vault_stats(vault)
+def _write_periodic_stats(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
+    stats = vault_stats(vault, skip_paths=settings.vault.skip_paths)
     relative_report = "output/periodic-stats.md"
     report_path = vault / relative_report
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -436,8 +436,8 @@ def _write_periodic_stats(vault_path: str | Path) -> str:
     return relative_report
 
 
-def _write_bookmark_review(vault_path: str | Path) -> str:
-    vault = Path(vault_path)
+def _write_bookmark_review(settings: Settings) -> str:
+    vault = Path(settings.vault.path)
     bookmarks = _tail_lines(vault / "meta" / "bookmarks.md", limit=50)
     relative_report = "output/bookmark-review.md"
     report_path = vault / relative_report
@@ -453,15 +453,15 @@ def _write_bookmark_review(vault_path: str | Path) -> str:
 
 
 def _write_filtered_lint_review(
-    vault_path: str | Path,
+    settings: Settings,
     *,
     relative_report: str,
     title: str,
     needle: str,
     empty_message: str,
 ) -> str:
-    vault = Path(vault_path)
-    lint = lint_vault(vault)
+    vault = Path(settings.vault.path)
+    lint = lint_vault(vault, skip_paths=settings.vault.skip_paths)
     matches = [
         issue
         for issue in lint.issues
@@ -483,3 +483,10 @@ def _tail_lines(path: Path, *, limit: int) -> list[str]:
     if not path.exists():
         return []
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines()[-limit:] if line.strip()]
+
+
+def _should_skip(relative: str, settings: Settings) -> bool:
+    return classify_vault_path(relative).skip or matches_configured_skip_path(
+        relative,
+        settings.vault.skip_paths,
+    )

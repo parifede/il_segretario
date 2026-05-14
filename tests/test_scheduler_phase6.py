@@ -284,6 +284,56 @@ def test_scheduler_watch_inbox_scans_local_vault_inbox_without_elaborati(tmp_pat
     assert "DO_NOT_SCAN_18" not in report
 
 
+def test_scheduler_execution_honors_configured_skip_paths(tmp_path: Path):
+    vault = tmp_path / "vault"
+    _make_valid_vault(vault)
+    (vault / ".pytest_cache").mkdir()
+    (vault / ".pytest_cache" / "cache.md").write_text("CACHE_SKIP_TOKEN\n", encoding="utf-8")
+    (vault / "output").mkdir()
+    (vault / "output" / "old-report.md").write_text("OUTPUT_SKIP_TOKEN\n", encoding="utf-8")
+    (vault / "self" / "profile").mkdir(parents=True, exist_ok=True)
+    (vault / "self" / "profile" / "profile.md").write_text("SELF_SKIP_TOKEN\n", encoding="utf-8")
+    (vault / "raw" / "private").mkdir()
+    (vault / "raw" / "private" / "secret.md").write_text("RAW_PRIVATE_SKIP_TOKEN\n", encoding="utf-8")
+    (vault / "raw" / "articles" / "visible.md").write_text("# Visible\n", encoding="utf-8")
+    taskboard = TaskboardStore(tmp_path / "state" / "taskboard.sqlite")
+    audit = AuditLog(
+        events_path=tmp_path / "state" / "audit" / "events.jsonl",
+        chain_path=tmp_path / "state" / "audit" / "hash_chain.jsonl",
+    )
+    settings = Settings(
+        vault=VaultSettings(
+            path=vault,
+            skip_paths=["raw/elaborati", "raw/private", ".pytest_cache", "output", "self"],
+        ),
+        scheduler=SchedulerSettings(
+            enabled=True,
+            raw_watcher_enabled=True,
+            daily_digest_enabled=True,
+            maintenance_budget_minutes=7,
+            max_tasks_per_cycle=4,
+        ),
+    )
+
+    summary = run_scheduler_once(settings, taskboard=taskboard, audit=audit, execute=True)
+
+    assert [item.command for item in summary.executed] == [
+        "watch.raw",
+        "daily.digest",
+        "weekly.lint",
+        "periodic.stats",
+    ]
+    raw_report = (vault / "output" / "watch-raw.md").read_text(encoding="utf-8")
+    stats_report = (vault / "output" / "periodic-stats.md").read_text(encoding="utf-8")
+    assert "raw/articles/visible.md" in raw_report
+    assert "raw/private/secret.md" not in raw_report
+    assert "RAW_PRIVATE_SKIP_TOKEN" not in raw_report
+    assert ".pytest_cache:" not in stats_report
+    assert "output:" not in stats_report
+    assert "self:" not in stats_report
+    assert audit.verify() is True
+
+
 def test_scheduler_failure_uses_scheduler_cooldown_minutes(tmp_path: Path, monkeypatch):
     vault = tmp_path / "vault"
     _make_valid_vault(vault)
