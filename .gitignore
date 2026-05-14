@@ -20,14 +20,14 @@ credentials.json
 token.json
 
 # optional local dev vault content
-vault/
-vault_dev/raw/
-vault_dev/self/
-vault_dev/output/
-vault_dev/knowledge/**/*.md
-vault_dev/meta/index.md
-vault_dev/meta/log.md
-vault_dev/meta/privacy_map.local.json
+/vault/
+/vault_dev/raw/
+/vault_dev/self/
+/vault_dev/output/
+/vault_dev/knowledge/**/*.md
+/vault_dev/meta/index.md
+/vault_dev/meta/log.md
+/vault_dev/meta/privacy_map.local.json
 
 # local test scratch
 .tmp/
