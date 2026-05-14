@@ -17,7 +17,9 @@ vault:
   path: "E:\\YOUR_REAL_VAULT"
 ```
 
-The default development vault path is `E:\il_segretario\vault_dev`. The real vault is always configurable and is not created inside the Python package.
+You can place or copy your actual Obsidian vault wherever you prefer, then update `segretario.yaml` to point at that folder. The default development vault path is `E:\il_segretario\vault_dev`. The real vault is always configurable and is not created inside the Python package.
+
+Keep `segretario.yaml` as a local machine config and keep real vault metadata private. Use `segretario.yaml.example` as the tracked template; do not publish a real config, `vault_dev/meta/index.md`, or `vault_dev/meta/log.md` if they contain personal vault state.
 
 ## First Commands
 
@@ -27,8 +29,11 @@ uv run segretario config show
 uv run segretario google status
 uv run segretario google login --force
 uv run segretario vault check
+uv run segretario ingest raw/articles/example.md --auto
 uv run segretario search "topic"
 uv run segretario query "question"
+uv run segretario lint wiki
+uv run segretario stats
 uv run segretario link "https://example.com/article"
 uv run segretario web "public research query"
 uv run segretario mail read --query "subject:example"
@@ -51,8 +56,6 @@ uv run segretario task show <task_id>
 uv run segretario task run <task_id>
 uv run segretario approve <task_id>
 uv run segretario deny <task_id>
-uv run segretario lint wiki
-uv run segretario stats
 ```
 
 ## Spec Phases
@@ -118,7 +121,7 @@ waiting_confirmation -> approve -> queued -> task run -> completed
 - Phase 5 Google commands use local safe interfaces unless real OAuth API usage is explicitly requested.
 - Phase 6 scheduler runs are bounded `run-once` cycles; `--execute` leases and completes safe local jobs without starting a daemon loop.
 - External answers are filtered by the output guard: public/cloud-safe pages can be shared, local-only pages require a projection, and no-export paths are blocked.
-- Audit events are append-only JSONL records linked by a hash chain.
+- Audit events are append-only JSONL records linked by an audit hash chain.
 - Google credentials, OAuth tokens, local state, and private dev vault content are gitignored.
 
 ## Stop Conditions
