@@ -52,7 +52,7 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
             },
             {"MarkdownTool", "SearchTool", "VaultTool"},
         ),
-        ExtractionAgent: ({"extract.plan"}, {"ExtractorTool", "VaultTool"}),
+        ExtractionAgent: ({"extract.plan", "extract.pdf"}, {"ExtractorTool", "VaultTool"}),
         SecurityAgent: (
             {"classify_path", "security.path", "knowledge.export", "web.query", "external.answer"},
             {"SecurityPolicy", "OutputGuard"},

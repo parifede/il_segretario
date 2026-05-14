@@ -31,6 +31,7 @@ from segretario.scheduler.jobs import SchedulerJob, run_scheduler_once
 from segretario.taskboard import TaskboardStore
 from segretario.taskboard import TaskStatus
 from segretario.taskboard.payloads import TaskPayloadStore
+from segretario.tools.extractor_tool import plan_extraction
 from segretario.tools.ollama_tool import build_local_llm
 from segretario.vault.repair import repair_raw_plan as build_repair_raw_plan
 
@@ -1089,6 +1090,106 @@ def extract_plan_command(
         _echo("- no extraction planning needed")
 
 
+@extract_app.command("queue")
+def extract_queue_command(
+    kind: str = typer.Option("pdf", "--kind", help="Extraction kind to queue."),
+    limit: int = typer.Option(
+        5,
+        "--limit",
+        min=0,
+        help="Maximum number of extract_candidate files to queue.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Queue safe extraction tasks from the extract plan without executing them."""
+    if kind != "pdf":
+        _echo(f"unsupported extract kind: {kind}")
+        raise typer.Exit(1)
+    settings = load_settings(config_path=config)
+    plan = plan_extraction(settings.vault.path, skip_paths=settings.vault.skip_paths)
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    active_sources = _active_sources_for_command(taskboard, payload_store, "extract.pdf")
+    candidates = [
+        source_path
+        for source_path in _extract_plan_candidates(plan.items, kind=kind)
+        if source_path not in active_sources
+    ][:limit]
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    queued: list[tuple[int, str]] = []
+    for source_path in candidates:
+        request = TaskRequest(
+            command="extract.pdf",
+            payload={
+                "vault_path": settings.vault.path,
+                "source_path": source_path,
+                "action": "extract.pdf",
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action=PermissionKernel.OUTPUT_WRITE,
+            source="extract",
+            requested_by="segretario",
+        )
+        task = taskboard.create_task(
+            source="extract",
+            requested_by="segretario",
+            command="extract.pdf",
+            risk="low",
+            assigned_agent="agent-runner",
+            input_ref="pending",
+        )
+        payload_ref = payload_store.save(int(task["id"]), request)
+        taskboard.update_input_ref(int(task["id"]), payload_ref)
+        audit.append_event("extract.task_queued", {"task_id": task["id"], "source_path": source_path})
+        queued.append((int(task["id"]), source_path))
+
+    _echo(f"Queued extract tasks: {len(queued)}")
+    for task_id, source_path in queued:
+        _echo(f"- {task_id}: {source_path}")
+
+
+@extract_app.command("pdf")
+def extract_pdf_command(
+    source: str,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Extract one PDF source to raw/extracted staging."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="extract.pdf",
+            payload={
+                "vault_path": settings.vault.path,
+                "source_path": source,
+                "action": "extract.pdf",
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action=PermissionKernel.OUTPUT_WRITE,
+        )
+    )
+    if not result.ok:
+        _echo(result.message)
+        raise typer.Exit(1)
+    output = result.output or {}
+    _echo(f"extracted: {output['path']}")
+
+
 def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
     candidates: list[str] = []
     for item in items:
@@ -1100,9 +1201,29 @@ def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
     return candidates
 
 
+def _extract_plan_candidates(items: list[str], *, kind: str) -> list[str]:
+    expected_reason = f"{kind} text extraction candidate"
+    candidates: list[str] = []
+    for item in items:
+        if " -> extract_candidate:" not in item or expected_reason not in item:
+            continue
+        source = item.removeprefix("- ").split(" -> ", 1)[0].strip()
+        if source:
+            candidates.append(source)
+    return candidates
+
+
 def _active_ingest_sources(
     taskboard: TaskboardStore,
     payload_store: TaskPayloadStore,
+) -> set[str]:
+    return _active_sources_for_command(taskboard, payload_store, "ingest")
+
+
+def _active_sources_for_command(
+    taskboard: TaskboardStore,
+    payload_store: TaskPayloadStore,
+    command: str,
 ) -> set[str]:
     active_statuses = {
         TaskStatus.QUEUED.value,
@@ -1111,7 +1232,7 @@ def _active_ingest_sources(
     }
     sources: set[str] = set()
     for task in taskboard.list_tasks(limit=1000):
-        if task.get("command") != "ingest" or task.get("status") not in active_statuses:
+        if task.get("command") != command or task.get("status") not in active_statuses:
             continue
         try:
             request = payload_store.load(str(task.get("input_ref") or ""))
@@ -1839,6 +1960,7 @@ def _agent_command_map():
         "repair.index.apply": MaintenanceAgent(),
         "repair.raw_plan": MaintenanceAgent(),
         "extract.plan": ExtractionAgent(),
+        "extract.pdf": ExtractionAgent(),
         "ingest": IngestAgent(),
         "link": ResearchAgent(),
         "web": ResearchAgent(),

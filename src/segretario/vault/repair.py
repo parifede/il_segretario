@@ -130,6 +130,8 @@ def _processed_raw_sources_from_log(log_text: str) -> set[str]:
     sources: set[str] = set()
     for match in re.finditer(r"\bingest\s+(raw/[^\r\n]+?)\s+->\s+knowledge/", log_text):
         sources.add(match.group(1).strip().replace("\\", "/"))
+    for match in re.finditer(r"\bextract\s+(raw/[^\r\n]+?)\s+->\s+raw/extracted/", log_text):
+        sources.add(match.group(1).strip().replace("\\", "/"))
     for match in re.finditer(r"\bingest_missing\s+\|\s+(raw/[^\r\n]+)", log_text):
         sources.add(match.group(1).strip().replace("\\", "/"))
     return sources

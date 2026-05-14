@@ -8,7 +8,7 @@ from segretario.tools.extractor_tool import ExtractorTool
 
 
 class ExtractionAgent(BaseAgent):
-    allowed_actions = frozenset({"extract.plan"})
+    allowed_actions = frozenset({"extract.plan", "extract.pdf"})
     allowed_tools = frozenset({"ExtractorTool", "VaultTool"})
 
     def run(self, request: object) -> dict[str, Any]:
@@ -24,6 +24,15 @@ class ExtractionAgent(BaseAgent):
                 skip_paths=_skip_paths(payload),
             )
             return {"path": report.path, "report_path": report.path, "items": report.items}
+        if action == "extract.pdf":
+            source_path = payload.get("source_path")
+            if source_path is None:
+                raise ValueError("extract.pdf requires source_path")
+            return ExtractorTool().extract_pdf(
+                self.require_vault_path(payload),
+                source_path,
+                skip_paths=_skip_paths(payload),
+            )
         raise ValueError(f"unsupported extraction action: {action}")
 
 
