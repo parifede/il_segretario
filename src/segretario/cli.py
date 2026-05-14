@@ -892,6 +892,51 @@ def repair_index(
         _echo("- no index repairs needed")
 
 
+@repair_app.command("raw-plan")
+def repair_raw_plan_command(
+    limit: int = typer.Option(
+        80,
+        "--limit",
+        min=0,
+        help="Maximum number of plan entries to print; full report is always written.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Plan conservative handling for unprocessed raw files."""
+    settings = load_settings(config_path=config)
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command="repair.raw_plan",
+            payload={
+                "vault_path": settings.vault.path,
+                "action": "repair.raw_plan",
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action="output.write",
+        )
+    )
+    if not result.ok:
+        _echo(result.message)
+        raise typer.Exit(1)
+    report = result.output or {}
+    _echo(f"Repair raw plan: {report['report_path']}")
+    items = report["items"]
+    if items:
+        for item in items[:limit]:
+            _echo(item)
+        remaining = len(items) - limit
+        if remaining > 0:
+            _echo(f"- ... {remaining} more entries in report")
+    else:
+        _echo("- no raw planning needed")
+
+
 @app.command()
 def ingest(
     source: str,
@@ -1606,6 +1651,7 @@ def _agent_command_map():
         "relink.apply": MaintenanceAgent(),
         "repair.index.dry_run": MaintenanceAgent(),
         "repair.index.apply": MaintenanceAgent(),
+        "repair.raw_plan": MaintenanceAgent(),
         "ingest": IngestAgent(),
         "link": ResearchAgent(),
         "web": ResearchAgent(),

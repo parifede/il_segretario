@@ -47,6 +47,7 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
                 "relink.apply",
                 "repair.index.dry_run",
                 "repair.index.apply",
+                "repair.raw_plan",
             },
             {"MarkdownTool", "SearchTool", "VaultTool"},
         ),

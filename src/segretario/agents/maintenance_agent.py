@@ -6,7 +6,7 @@ from typing import Any
 
 from segretario.agents.base import BaseAgent
 from segretario.vault.health import lint_vault, vault_stats
-from segretario.vault.repair import repair_index_apply, repair_index_dry_run
+from segretario.vault.repair import repair_index_apply, repair_index_dry_run, repair_raw_plan
 from segretario.vault.relink import relink_apply, relink_dry_run
 
 
@@ -19,6 +19,7 @@ class MaintenanceAgent(BaseAgent):
             "relink.apply",
             "repair.index.dry_run",
             "repair.index.apply",
+            "repair.raw_plan",
         }
     )
     allowed_tools = frozenset({"MarkdownTool", "SearchTool", "VaultTool"})
@@ -106,6 +107,21 @@ class MaintenanceAgent(BaseAgent):
                 "path": report.path,
                 "report_path": report.path,
                 "entries": report.entries,
+            }
+
+        if action == "repair.raw_plan":
+            today = payload.get("today")
+            if today is not None and not isinstance(today, date):
+                raise ValueError("today must be a date")
+            report = repair_raw_plan(
+                self.require_vault_path(payload),
+                today=today,
+                skip_paths=_skip_paths(payload),
+            )
+            return {
+                "path": report.path,
+                "report_path": report.path,
+                "items": report.items,
             }
 
         raise ValueError(f"unsupported maintenance action: {action}")
