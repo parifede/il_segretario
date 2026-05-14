@@ -130,6 +130,29 @@ def test_task_cancel_cli_cancels_non_terminal_task_and_audits(
     assert "gmail.send requires confirmation" not in listed.output
 
 
+def test_tasks_cli_hides_historical_errors_on_completed_tasks(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["stats"])
+    task_id = _latest_task_id(tmp_path)
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    db.execute(
+        "update tasks set last_error = ? where id = ?",
+        ("stale retry message", task_id),
+    )
+    db.commit()
+
+    listed = runner.invoke(app, ["tasks", "--limit", "1"])
+
+    assert listed.exit_code == 0
+    assert f"{task_id}: stats [completed] risk=low" in listed.output
+    assert "stale retry message" not in listed.output
+
+
 def test_task_cancel_latest_cancels_newest_waiting_task_for_command(
     tmp_path: Path,
     monkeypatch,

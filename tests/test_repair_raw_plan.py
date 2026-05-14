@@ -118,6 +118,88 @@ def test_repair_raw_queue_creates_executable_ingest_tasks_only_for_candidates(
     assert _audit(tmp_path).verify() is True
 
 
+def test_repair_raw_queue_skips_already_queued_ingest_sources(tmp_path: Path, monkeypatch):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "first.md").write_text("# First\n", encoding="utf-8")
+    (vault / "raw" / "articles" / "second.md").write_text("# Second\n", encoding="utf-8")
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+
+    first = CliRunner().invoke(app, ["repair", "raw-queue", "--limit", "1"])
+    second = CliRunner().invoke(app, ["repair", "raw-queue", "--limit", "1"])
+    third = CliRunner().invoke(app, ["repair", "raw-queue", "--limit", "1"])
+
+    assert first.exit_code == 0
+    assert "raw/articles/first.md" in first.output
+    assert second.exit_code == 0
+    assert "raw/articles/second.md" in second.output
+    assert third.exit_code == 0
+    assert "Queued ingest tasks: 0" in third.output
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    rows = db.execute("select command, status from tasks order by id").fetchall()
+    assert rows == [("ingest", "queued"), ("ingest", "queued")]
+
+
+def test_agents_run_executes_multiple_queued_tasks_sequentially(tmp_path: Path, monkeypatch):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "first.md").write_text("# First\n", encoding="utf-8")
+    (vault / "raw" / "articles" / "second.md").write_text("# Second\n", encoding="utf-8")
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["repair", "raw-queue", "--limit", "2"])
+
+    result = runner.invoke(app, ["agents", "run", "--limit", "2"])
+
+    assert result.exit_code == 0
+    assert "Executed: 2" in result.output
+    assert "ingest completed -> knowledge/first.md" in result.output
+    assert "ingest completed -> knowledge/second.md" in result.output
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    rows = db.execute("select command, status from tasks order by id").fetchall()
+    assert rows == [("ingest", "completed"), ("ingest", "completed")]
+    assert _audit(tmp_path).verify() is True
+
+
+def test_agents_run_ingests_utf16_text_candidate(tmp_path: Path, monkeypatch):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "utf16.txt").write_bytes("# UTF16 Source\n\nBody\n".encode("utf-16"))
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["repair", "raw-queue", "--limit", "1"])
+
+    result = runner.invoke(app, ["agents", "run", "--limit", "1"])
+
+    assert result.exit_code == 0
+    assert "Executed: 1" in result.output
+    assert "ingest completed -> knowledge/utf16-source.md" in result.output
+    assert (vault / "knowledge" / "utf16-source.md").exists()
+    db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
+    rows = db.execute("select command, status from tasks order by id").fetchall()
+    assert rows == [("ingest", "completed")]
+    assert _audit(tmp_path).verify() is True
+
+
+def test_agents_run_ingests_utf16_le_text_without_bom(tmp_path: Path, monkeypatch):
+    vault = _make_vault(tmp_path)
+    (vault / "raw" / "articles" / "utf16le.txt").write_bytes(
+        "# UTF16LE Source\n\nBody\n".encode("utf-16-le")
+    )
+    config = _write_config(tmp_path, vault)
+    monkeypatch.setenv("SEGRETARIO_CONFIG", str(config))
+    runner = CliRunner()
+    runner.invoke(app, ["repair", "raw-queue", "--limit", "1"])
+
+    result = runner.invoke(app, ["agents", "run", "--limit", "1"])
+
+    assert result.exit_code == 0
+    assert "Executed: 1" in result.output
+    assert "ingest completed -> knowledge/utf16le-source.md" in result.output
+    assert (vault / "knowledge" / "utf16le-source.md").exists()
+    assert _audit(tmp_path).verify() is True
+
+
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     (vault / "knowledge").mkdir(parents=True)

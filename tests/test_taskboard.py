@@ -283,6 +283,33 @@ def test_record_failure_requeues_until_max_retries_then_fails(tmp_path):
     assert final["last_error"] == "still broken"
 
 
+def test_complete_task_clears_retry_error_and_cooldown(tmp_path):
+    store = TaskboardStore(tmp_path / "taskboard.sqlite")
+    store.initialize()
+    task = store.create_task(
+        source="cli",
+        requested_by="operator",
+        command="flaky",
+        risk="medium",
+    )
+    store.acquire_lease(owner="worker-a", lease_seconds=30)
+    retry = store.record_failure(
+        task["id"],
+        error="temporary",
+        max_retries=2,
+        cooldown_seconds=60,
+    )
+    assert retry["last_error"] == "temporary"
+
+    completed = store.complete_task(task["id"], output_ref="output.md")
+
+    assert completed["status"] == TaskStatus.COMPLETED.value
+    assert completed["output_ref"] == "output.md"
+    assert completed["lease_owner"] is None
+    assert completed["lease_expires_at"] is None
+    assert completed["last_error"] is None
+
+
 def test_record_failure_requeues_with_cooldown_before_next_lease(tmp_path):
     store = TaskboardStore(tmp_path / "taskboard.sqlite")
     store.initialize()

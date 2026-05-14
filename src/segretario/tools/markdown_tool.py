@@ -45,7 +45,7 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
     if source.is_symlink():
         raise ValueError("ingest source cannot be a symlink")
 
-    raw = source.read_text(encoding="utf-8").lstrip("\ufeff")
+    raw = _read_source_text(source).lstrip("\ufeff")
     if _looks_personal(raw):
         raise ConfirmationNeededError("personal-looking content requires confirmation")
 
@@ -91,6 +91,28 @@ def _normalize_source(source_path: Path | str) -> str:
     if Path(relative).suffix.lower() not in {".md", ".txt"}:
         raise ValueError("ingest source must be markdown or text")
     return relative
+
+
+def _read_source_text(source: Path) -> str:
+    data = source.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16")
+
+    sample = data[:200]
+    if b"\x00" in sample:
+        even_nulls = sample[0::2].count(0)
+        odd_nulls = sample[1::2].count(0)
+        if odd_nulls > even_nulls and odd_nulls >= max(2, len(sample) // 8):
+            return data.decode("utf-16-le", errors="replace")
+        if even_nulls > odd_nulls and even_nulls >= max(2, len(sample) // 8):
+            return data.decode("utf-16-be", errors="replace")
+
+    for encoding in ("utf-8-sig", "utf-16"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, object], str]:

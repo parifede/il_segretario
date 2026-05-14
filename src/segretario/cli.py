@@ -311,6 +311,8 @@ def tasks(
     for task in rows:
         if task["status"] in {"denied", "failed", "cancelled"}:
             reason = task.get("last_error") or task.get("confirmation_reason") or ""
+        elif task["status"] == "completed":
+            reason = ""
         else:
             reason = task.get("confirmation_reason") or task.get("last_error") or ""
         suffix = f" - {reason}" if reason else ""
@@ -503,6 +505,41 @@ def agents_run_once(
         _echo(f"{task_id}: {command} {status} -> {output_ref}")
     else:
         _echo(f"{task_id}: {command} {status}")
+
+
+@agents_app.command("run")
+def agents_run(
+    limit: int = typer.Option(
+        5,
+        "--limit",
+        min=0,
+        help="Maximum number of queued agent tasks to execute sequentially.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Let fixed agents claim and execute a bounded batch of queued tasks."""
+    settings = load_settings(config_path=config)
+    executed: list[tuple[int, str, str, str | None]] = []
+    for _ in range(limit):
+        result = _run_one_agent_task(settings)
+        if result is None:
+            break
+        executed.append(result)
+
+    _echo(f"Executed: {len(executed)}")
+    if not executed:
+        _echo("No runnable agent tasks.")
+        return
+    for task_id, command, status, output_ref in executed:
+        if output_ref:
+            _echo(f"{task_id}: {command} {status} -> {output_ref}")
+        else:
+            _echo(f"{task_id}: {command} {status}")
 
 
 def _run_queued_task(settings, task_id: int) -> None:
@@ -956,10 +993,15 @@ def repair_raw_queue_command(
     """Queue safe ingest tasks from the raw repair plan without executing them."""
     settings = load_settings(config_path=config)
     plan = build_repair_raw_plan(settings.vault.path, skip_paths=settings.vault.skip_paths)
-    candidates = _raw_plan_ingest_candidates(plan.items)[:limit]
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
     taskboard.initialize()
     payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    active_sources = _active_ingest_sources(taskboard, payload_store)
+    candidates = [
+        source_path
+        for source_path in _raw_plan_ingest_candidates(plan.items)
+        if source_path not in active_sources
+    ][:limit]
     audit = AuditLog(
         events_path=settings.audit.events_path,
         chain_path=settings.audit.hash_chain_path,
@@ -1008,6 +1050,29 @@ def _raw_plan_ingest_candidates(items: list[str]) -> list[str]:
         if source:
             candidates.append(source)
     return candidates
+
+
+def _active_ingest_sources(
+    taskboard: TaskboardStore,
+    payload_store: TaskPayloadStore,
+) -> set[str]:
+    active_statuses = {
+        TaskStatus.QUEUED.value,
+        TaskStatus.RUNNING.value,
+        TaskStatus.WAITING_CONFIRMATION.value,
+    }
+    sources: set[str] = set()
+    for task in taskboard.list_tasks(limit=1000):
+        if task.get("command") != "ingest" or task.get("status") not in active_statuses:
+            continue
+        try:
+            request = payload_store.load(str(task.get("input_ref") or ""))
+        except (FileNotFoundError, ValueError, KeyError):
+            continue
+        source_path = request.payload.get("source_path")
+        if source_path:
+            sources.add(str(source_path).replace("\\", "/"))
+    return sources
 
 
 @app.command()

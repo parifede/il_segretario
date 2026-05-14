@@ -216,6 +216,7 @@ class TaskboardStore:
                     output_ref = COALESCE(?, output_ref),
                     lease_owner = NULL,
                     lease_expires_at = NULL,
+                    last_error = NULL,
                     updated_at = ?
                 WHERE id = ?
                 """,
