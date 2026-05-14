@@ -40,7 +40,14 @@ def test_fixed_agents_declare_allowed_actions_and_tools():
             {"CalendarTool"},
         ),
         MaintenanceAgent: (
-            {"stats", "lint.wiki", "relink.dry_run", "relink.apply"},
+            {
+                "stats",
+                "lint.wiki",
+                "relink.dry_run",
+                "relink.apply",
+                "repair.index.dry_run",
+                "repair.index.apply",
+            },
             {"MarkdownTool", "SearchTool", "VaultTool"},
         ),
         SecurityAgent: (

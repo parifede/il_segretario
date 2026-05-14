@@ -9,6 +9,7 @@ from pathlib import Path
 from segretario.vault.frontmatter import parse_frontmatter
 from segretario.vault.index_log import append_log
 from segretario.vault.paths import classify_vault_path, matches_configured_skip_path
+from segretario.vault.wikilinks import extract_wikilink_references
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,7 @@ def _orphan_knowledge_issues(
     *,
     skip_paths: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
-    linked_titles = {match.strip() for match in re.findall(r"\[\[([^\]#|]+)", index_text)}
+    linked_references = extract_wikilink_references(index_text)
     issues: list[str] = []
     knowledge_dir = vault / "knowledge"
     if not knowledge_dir.exists():
@@ -111,7 +112,8 @@ def _orphan_knowledge_issues(
         text = page.read_text(encoding="utf-8", errors="replace")
         metadata, body = parse_frontmatter(text)
         title = str(metadata.get("title") or _extract_title(body, page.stem))
-        if title not in linked_titles:
+        path_reference = relative.removesuffix(".md")
+        if title not in linked_references and relative not in linked_references and path_reference not in linked_references:
             issues.append(f"{relative}: orphan knowledge page")
     return issues
 

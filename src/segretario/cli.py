@@ -45,6 +45,7 @@ privacy_app = typer.Typer(help="Privacy projection commands.")
 audit_app = typer.Typer(help="Audit commands.")
 task_app = typer.Typer(help="Single task commands.")
 agents_app = typer.Typer(help="Agent worker commands.")
+repair_app = typer.Typer(help="Vault repair commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -57,6 +58,7 @@ app.add_typer(privacy_app, name="privacy")
 app.add_typer(audit_app, name="audit")
 app.add_typer(task_app, name="task")
 app.add_typer(agents_app, name="agents")
+app.add_typer(repair_app, name="repair")
 
 
 def _echo(message: object = "", *, debug: bool = False) -> None:
@@ -840,6 +842,56 @@ def relink(
         _echo("- no missing links found")
 
 
+@repair_app.command("index")
+def repair_index(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview missing knowledge entries for meta/index.md.",
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Apply missing knowledge entries to meta/index.md.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to segretario.yaml.",
+    ),
+) -> None:
+    """Repair meta/index.md by adding missing knowledge wikilinks."""
+    if dry_run == apply:
+        _echo("choose exactly one: --dry-run or --apply")
+        raise typer.Exit(1)
+    settings = load_settings(config_path=config)
+    command = "repair.index.dry_run" if dry_run else "repair.index.apply"
+    result = _build_core(settings).handle(
+        TaskRequest(
+            command=command,
+            payload={
+                "vault_path": settings.vault.path,
+                "action": command,
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action="output.write" if dry_run else "knowledge.write",
+        )
+    )
+    if not result.ok:
+        _echo(result.message)
+        raise typer.Exit(1)
+    report = result.output or {}
+    label = "Repair index report" if dry_run else "Repair index apply report"
+    _echo(f"{label}: {report['report_path']}")
+    if report["entries"]:
+        for entry in report["entries"]:
+            _echo(entry)
+    else:
+        _echo("- no index repairs needed")
+
+
 @app.command()
 def ingest(
     source: str,
@@ -1552,6 +1604,8 @@ def _agent_command_map():
         "lint.wiki": MaintenanceAgent(),
         "relink.dry_run": MaintenanceAgent(),
         "relink.apply": MaintenanceAgent(),
+        "repair.index.dry_run": MaintenanceAgent(),
+        "repair.index.apply": MaintenanceAgent(),
         "ingest": IngestAgent(),
         "link": ResearchAgent(),
         "web": ResearchAgent(),

@@ -83,6 +83,26 @@ def test_lint_uses_frontmatter_title_for_orphan_detection(tmp_path: Path):
     assert "knowledge/alpha-topic.md: orphan knowledge page" not in report.issues
 
 
+def test_lint_treats_obsidian_alias_links_as_indexed(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / "meta").mkdir(parents=True)
+    (vault / "knowledge" / "nested").mkdir(parents=True)
+    (vault / "meta" / "index.md").write_text(
+        "# Index\n\n## Knowledge\n"
+        "- [[knowledge/nested/alpha|Alpha Topic]] `knowledge/nested/alpha.md`\n",
+        encoding="utf-8",
+    )
+    (vault / "meta" / "log.md").write_text("# Log\n", encoding="utf-8")
+    (vault / "knowledge" / "nested" / "alpha.md").write_text(
+        "---\ntitle: Alpha Topic\nstatus: active\n---\n# Alpha\n",
+        encoding="utf-8",
+    )
+
+    report = lint_vault(vault, today=date(2026, 5, 11))
+
+    assert "knowledge/nested/alpha.md: orphan knowledge page" not in report.issues
+
+
 def test_lint_does_not_flag_raw_source_referenced_by_knowledge_frontmatter(tmp_path: Path):
     vault = tmp_path / "vault"
     (vault / "meta").mkdir(parents=True)
