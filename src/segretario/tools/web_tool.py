@@ -20,6 +20,27 @@ class LinkFetchResult:
     source_url: str
 
 
+class WebTool:
+    """Public web fetch side-effect tool."""
+
+    def fetch_link(
+        self,
+        vault_path: Path | str,
+        url: str,
+        *,
+        save_dir: str = "raw/articles",
+        timeout_seconds: float = 20.0,
+        connector: WebConnector | None = None,
+    ) -> LinkFetchResult:
+        return fetch_link(
+            vault_path,
+            url,
+            save_dir=save_dir,
+            timeout_seconds=timeout_seconds,
+            connector=connector,
+        )
+
+
 def fetch_link(
     vault_path: Path | str,
     url: str,

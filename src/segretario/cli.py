@@ -442,7 +442,16 @@ def _run_queued_task(settings, task_id: int) -> None:
             "task.started",
             {"task_id": task_id, "command": request.command, "source": "cli"},
         )
-        output = _build_core(settings).router.agent_for(request.command).run(request)
+        agent = _build_core(settings).router.agent_for(request.command)
+        audit.append_event(
+            "tool.requested",
+            {
+                "task_id": task_id,
+                "command": request.command,
+                "tools": sorted(getattr(agent, "allowed_tools", [])),
+            },
+        )
+        output = agent.run(request)
     except Exception as exc:
         max_retries = (
             1
@@ -456,6 +465,10 @@ def _run_queued_task(settings, task_id: int) -> None:
             cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
         )
         audit.append_event(
+            "tool.failed",
+            {"task_id": task_id, "command": task["command"], "error": str(exc)},
+        )
+        audit.append_event(
             "task.failed",
             {"task_id": task_id, "command": task["command"], "error": str(exc)},
         )
@@ -463,6 +476,10 @@ def _run_queued_task(settings, task_id: int) -> None:
         raise typer.Exit(1) from exc
 
     output_ref = _cli_output_ref(output)
+    audit.append_event(
+        "tool.completed",
+        {"task_id": task_id, "command": request.command, "output": output_ref},
+    )
     taskboard.complete_task(task_id, output_ref=output_ref)
     audit.append_event(
         "task.completed",
@@ -495,7 +512,16 @@ def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
             "agent.task_started",
             {"task_id": task_id, "command": request.command, "agent": "agent-runner"},
         )
-        output = command_map[request.command].run(request)
+        agent = command_map[request.command]
+        audit.append_event(
+            "tool.requested",
+            {
+                "task_id": task_id,
+                "command": request.command,
+                "tools": sorted(getattr(agent, "allowed_tools", [])),
+            },
+        )
+        output = agent.run(request)
     except Exception as exc:
         max_retries = (
             1
@@ -509,12 +535,20 @@ def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
             cooldown_seconds=settings.taskboard.retry_cooldown_seconds,
         )
         audit.append_event(
+            "tool.failed",
+            {"task_id": task_id, "command": command, "error": str(exc)},
+        )
+        audit.append_event(
             "agent.task_failed",
             {"task_id": task_id, "command": command, "error": str(exc)},
         )
         return task_id, command, "failed", None
 
     output_ref = _cli_output_ref(output)
+    audit.append_event(
+        "tool.completed",
+        {"task_id": task_id, "command": request.command, "output": output_ref},
+    )
     taskboard.complete_task(task_id, output_ref=output_ref)
     audit.append_event(
         "agent.task_completed",

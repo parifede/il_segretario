@@ -81,10 +81,23 @@ class SegretarioCore:
                 message=_decision_message(decision, action),
             )
 
+        agent = self.router.agent_for(request.command)
+        self.audit.append_event(
+            "tool.requested",
+            {
+                "task_id": task_id,
+                "command": request.command,
+                "tools": sorted(getattr(agent, "allowed_tools", [])),
+            },
+        )
         try:
-            output = self.router.agent_for(request.command).run(request)
+            output = agent.run(request)
         except Exception as exc:
             self.taskboard.record_failure(task_id, error=str(exc), max_retries=1)
+            self.audit.append_event(
+                "tool.failed",
+                {"task_id": task_id, "action": action, "error": str(exc)},
+            )
             self.audit.append_event(
                 "task.failed",
                 {"task_id": task_id, "action": action, "error": str(exc)},
@@ -92,6 +105,10 @@ class SegretarioCore:
             return CoreResult(ok=False, task_id=task_id, message=str(exc))
 
         output_ref = _safe_output_ref(output)
+        self.audit.append_event(
+            "tool.completed",
+            {"task_id": task_id, "command": request.command, "output": output_ref},
+        )
         self.taskboard.complete_task(task_id, output_ref=output_ref)
         self.audit.append_event(
             "task.completed",

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from segretario.agents.base import BaseAgent
-from segretario.agents.ingest_agent import ingest_article
 from segretario.connectors.web_client import WebConnector
+from segretario.tools.markdown_tool import ingest_article
 from segretario.tools.web_tool import fetch_link
 
 

@@ -13,6 +13,25 @@ class SearchResult:
     snippet: str
 
 
+class SearchTool:
+    """Local vault search tool."""
+
+    def search(
+        self,
+        vault_path: Path | str,
+        query: str,
+        *,
+        include_self: bool = False,
+        include_raw: bool = False,
+    ) -> list[SearchResult]:
+        return search_vault(
+            vault_path,
+            query,
+            include_self=include_self,
+            include_raw=include_raw,
+        )
+
+
 def search_vault(
     vault_path: Path | str,
     query: str,
