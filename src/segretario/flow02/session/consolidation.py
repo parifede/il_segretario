@@ -64,7 +64,6 @@ class ConsolidationJob:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         target = target_dir / f"{session_id}_{timestamp}.json"
         tmp = target.with_suffix(".tmp")
-
         payload = {
             "session_id": session_id,
             "consolidated_at": datetime.now(timezone.utc).isoformat(),
