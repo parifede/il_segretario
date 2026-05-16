@@ -135,6 +135,67 @@ def zarsuit_context_request(
         _echo("[fail] " + result.message)
         raise typer.Exit(1)
 
+
+# sub-app session — Flow 02
+session_app = typer.Typer(name="session", help="Gestione sessione Zarsuit.")
+app.add_typer(session_app)
+
+
+def _get_session_manager(settings):
+    from pathlib import Path as _Path
+    from segretario.flow02.session.manager import SessionManager
+    sessions_dir = _Path(settings.taskboard.sqlite_path).parent / "sessions"
+    return SessionManager(sessions_dir)
+
+
+@session_app.command("status")
+def session_status(
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Mostra lo stato della sessione attiva."""
+    settings = load_settings(config_path=config)
+    manager = _get_session_manager(settings)
+    session = manager.current_session()
+    if session is None:
+        _echo("Nessuna sessione attiva.")
+        return
+    _echo(f"Session ID:   {session.session_id}")
+    _echo(f"Aperta:       {session.opened_at.isoformat()}")
+    _echo(f"Ultima att.:  {session.last_activity().isoformat()}")
+    _echo(f"Inattiva:     {session.minutes_inactive():.1f} min")
+    _echo(f"Aperta da:    {session.hours_since_open():.1f} ore")
+    _echo(f"Da chiudere:  {'si' if session.should_close() else 'no'}")
+
+
+@session_app.command("chat")
+def session_chat(
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Proiezione human-readable della sessione (chat.md)."""
+    settings = load_settings(config_path=config)
+    manager = _get_session_manager(settings)
+    session = manager.current_session()
+    if session is None:
+        _echo("Nessuna sessione attiva.")
+        return
+    _echo(session.log.to_chat_md())
+
+
+@session_app.command("close")
+def session_close(
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Chiude manualmente la sessione attiva (debug)."""
+    settings = load_settings(config_path=config)
+    manager = _get_session_manager(settings)
+    session = manager.current_session()
+    if session is None:
+        _echo("Nessuna sessione da chiudere.")
+        return
+    manager.close_session(session)
+    _echo(f"Sessione {session.session_id} chiusa.")
+
+
 def _echo(message: object = "", *, debug: bool = False) -> None:
     text = sanitize_user_output(message, debug=debug)
     try:
