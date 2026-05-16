@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Protocol
 
@@ -119,6 +120,11 @@ class OllamaAsyncLLMClient:
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
+                        # think=False keeps JSON output in the 'response' field instead of
+                        # 'thinking'. Qwen 3.5 (and other thinking models) default to placing
+                        # output in 'thinking', which would leave 'response' empty and break
+                        # json.loads().
+                        "think": False,
                         "options": {"temperature": 0.2, "num_ctx": _ASYNC_CONTEXT_WINDOW},
                         # keep_alive=0: scarica async_model immediatamente dopo l'inferenza.
                         # Coerente con il design (PDF sezione 3.3): scarica sync_model ->
@@ -135,11 +141,26 @@ class OllamaAsyncLLMClient:
                 ok=False, message=f"ollama call failed: {e}"
             )
 
+        # Read from response, fallback to thinking (some models emit JSON only in
+        # thinking even with think=False, or older Ollama versions may not respect it).
+        raw = data.get("response", "").strip()
+        if not raw:
+            raw = data.get("thinking", "").strip()
+
+        # Strip any leftover <think>...</think> blocks (legacy format on some models).
+        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+        # Extract first JSON object, in case the model wrapped it in prose.
+        json_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if json_match:
+            cleaned = json_match.group(0)
+
         try:
-            parsed = json.loads(data.get("response", "{}"))
+            parsed = json.loads(cleaned) if cleaned else {}
         except json.JSONDecodeError:
             return ConsolidationResult(
-                ok=False, message="ollama response is not valid JSON"
+                ok=False,
+                message=f"ollama response is not valid JSON after cleaning: {raw[:200]}",
             )
 
         facts = parsed.get("facts", [])
