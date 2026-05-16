@@ -201,7 +201,9 @@ def session_consolidate(
     session_id: str = typer.Option(..., "--session-id", help="ID sessione da consolidare"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Esegue il consolidamento di una sessione (richiede Ollama + async_model)."""
+    """Esegue il consolidamento di una sessione (richiede Ollama + async_model).
+
+    Prima di caricare async_model, fa unload di sync_model per liberare VRAM."""
     from pathlib import Path as _Path
     from segretario.connectors.async_llm_client import build_async_client
     from segretario.flow02.session.consolidation import ConsolidationJob
@@ -213,7 +215,11 @@ def session_consolidate(
         raise typer.Exit(1)
 
     client = build_async_client(settings.llm)
-    job = ConsolidationJob(client=client)
+    job = ConsolidationJob(
+        client=client,
+        sync_model_to_unload=settings.llm.sync_model,
+        ollama_base_url=settings.llm.base_url,
+    )
     result = job.run(session_jsonl, _Path(settings.vault.path))
 
     if result.ok:

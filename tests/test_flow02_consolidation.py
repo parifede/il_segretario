@@ -69,3 +69,85 @@ def test_consolidation_empty_session(tmp_path):
     result = job.run(session, tmp_path)
     assert result.ok
     assert not (tmp_path / "knowledge" / "consolidated").exists()
+
+
+def test_consolidation_skips_unload_when_no_sync_model_configured(tmp_path):
+    """Se sync_model_to_unload è None, ConsolidationJob non tenta unload."""
+    class FakeClient:
+        def consolidate_session(self, session_jsonl, vault_path):
+            return ConsolidationResult(ok=True, message="ok", extracted_facts=[])
+
+    session = tmp_path / "s.jsonl"
+    session.write_text('{"role":"user","content_ref":"x"}\n', encoding="utf-8")
+
+    job = ConsolidationJob(client=FakeClient())  # niente sync_model
+    result = job.run(session, tmp_path)
+    assert result.ok
+
+
+def test_consolidation_attempts_unload_when_sync_model_configured(
+    tmp_path, monkeypatch
+):
+    """Verifica che ConsolidationJob chiami _ollama_stop_model quando configurato."""
+    from segretario.flow02.session import consolidation as cons_module
+
+    unload_calls = []
+
+    def fake_list_loaded(base_url, timeout=10):
+        return ["gemma4:e4b"]
+
+    def fake_stop(base_url, model, timeout=30):
+        unload_calls.append(model)
+        return True
+
+    monkeypatch.setattr(cons_module, "_ollama_list_loaded", fake_list_loaded)
+    monkeypatch.setattr(cons_module, "_ollama_stop_model", fake_stop)
+
+    class FakeClient:
+        def consolidate_session(self, session_jsonl, vault_path):
+            return ConsolidationResult(ok=True, message="ok", extracted_facts=[])
+
+    session = tmp_path / "s.jsonl"
+    session.write_text('{"role":"user","content_ref":"x"}\n', encoding="utf-8")
+
+    job = ConsolidationJob(
+        client=FakeClient(),
+        sync_model_to_unload="gemma4:e4b",
+        ollama_base_url="http://127.0.0.1:11434",
+    )
+    job.run(session, tmp_path)
+    assert "gemma4:e4b" in unload_calls
+
+
+def test_consolidation_skips_unload_when_sync_model_not_loaded(
+    tmp_path, monkeypatch
+):
+    """Se il sync model non è in VRAM, non fare la chiamata di stop."""
+    from segretario.flow02.session import consolidation as cons_module
+
+    unload_calls = []
+
+    def fake_list_loaded(base_url, timeout=10):
+        return []
+
+    def fake_stop(base_url, model, timeout=30):
+        unload_calls.append(model)
+        return True
+
+    monkeypatch.setattr(cons_module, "_ollama_list_loaded", fake_list_loaded)
+    monkeypatch.setattr(cons_module, "_ollama_stop_model", fake_stop)
+
+    class FakeClient:
+        def consolidate_session(self, session_jsonl, vault_path):
+            return ConsolidationResult(ok=True, message="ok", extracted_facts=[])
+
+    session = tmp_path / "s.jsonl"
+    session.write_text('{"role":"user","content_ref":"x"}\n', encoding="utf-8")
+
+    job = ConsolidationJob(
+        client=FakeClient(),
+        sync_model_to_unload="gemma4:e4b",
+        ollama_base_url="http://127.0.0.1:11434",
+    )
+    job.run(session, tmp_path)
+    assert unload_calls == []

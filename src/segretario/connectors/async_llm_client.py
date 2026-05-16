@@ -9,6 +9,43 @@ import httpx
 from segretario.config.settings import LLMSettings
 
 
+def _ollama_stop_model(base_url: str, model: str, timeout: int = 30) -> bool:
+    """Forza lo stop di un modello caricato in VRAM via Ollama API.
+
+    Equivalente a `ollama stop <model>`. Usa keep_alive=0 in una richiesta
+    di generate vuota per fare unload immediato.
+
+    Ritorna True se la chiamata è andata a buon fine, False altrimenti.
+    Non solleva eccezioni: l'unload è best-effort.
+    """
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                f"{base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": "",
+                    "keep_alive": 0,
+                    "stream": False,
+                },
+            )
+            return response.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _ollama_list_loaded(base_url: str, timeout: int = 10) -> list[str]:
+    """Ritorna la lista dei modelli attualmente caricati in VRAM via /api/ps."""
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(f"{base_url}/api/ps")
+            response.raise_for_status()
+            data = response.json()
+            return [m.get("name", "") for m in data.get("models", [])]
+    except httpx.HTTPError:
+        return []
+
+
 class ConsolidationResult:
     def __init__(
         self,
