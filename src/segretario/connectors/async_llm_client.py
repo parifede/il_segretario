@@ -115,6 +115,11 @@ class OllamaAsyncLLMClient:
                         "stream": False,
                         "format": "json",
                         "options": {"temperature": 0.2},
+                        # keep_alive=0: scarica async_model immediatamente dopo l'inferenza.
+                        # Coerente con il design (PDF sezione 3.3): scarica sync_model ->
+                        # carica async_model -> consolidamento -> scarica async_model ->
+                        # ricarica sync_model. Lo stop di sync_model PRIMA dell'inferenza
+                        # è gestito da ConsolidationJob.
                         "keep_alive": 0,
                     },
                 )
