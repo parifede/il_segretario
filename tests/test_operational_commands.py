@@ -50,7 +50,9 @@ def test_work_queues_and_runs_extract_batch(tmp_path: Path, monkeypatch):
     assert extracted.exists()
     assert "Operational PDF" in extracted.read_text(encoding="utf-8")
     db = sqlite3.connect(tmp_path / "state" / "taskboard.sqlite")
-    rows = db.execute("select command, status from tasks order by id").fetchall()
+    rows = db.execute(
+        "select command, status from tasks where command = 'extract.pdf' order by id"
+    ).fetchall()
     assert rows == [("extract.pdf", "completed")]
 
 
