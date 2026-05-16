@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from segretario.flow02.attestation import AttestationBuilder, ContractVerifier
+from segretario.flow02.output_guard import OutputGuard
 from segretario.flow02.models import (
     DetailLevel,
     OutputPolicy,
@@ -122,3 +123,21 @@ def test_builder_populates_all_fields():
     assert att.request_id == "r2"
     assert att.output_policy == OutputPolicy.FREE
     assert att.max_detail_level == DetailLevel.OPERATIONAL
+
+
+def test_output_guard_delegates_to_verifier():
+    att = _build()
+    out = _output()
+    guard = OutputGuard()
+    ok, reason = guard.verify(out, att)
+    assert ok is True
+    assert reason is None
+
+
+def test_output_guard_passes_failure_through():
+    att = _build()
+    out = _output(cited_fields=["private_diary"])
+    guard = OutputGuard()
+    ok, reason = guard.verify(out, att)
+    assert ok is False
+    assert reason == RetryReason.CONTRACT_VIOLATION
