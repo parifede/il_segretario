@@ -13,11 +13,18 @@ from segretario.flow02.recall_engine import RecallEngine
 from segretario.flow02.working_memory import WorkingMemory
 
 _DEFAULT_L2_CEILING = 4_000
+_MEMORY_LOOKUP_L2_CEILING = 4_000   # L2 base, recall L3 added separately
+_REFINEMENT_L2_CEILING = 2_500       # Flow 02 refinement post-Zarsuit
 _RECALL_L3_TOKENS = 4_000
 
 
-def _l2_ceiling(retry_attempt: int) -> int:
-    return _DEFAULT_L2_CEILING * (2 if retry_attempt > 0 else 1)
+def _l2_ceiling(intent: IntentType, retry_attempt: int) -> int:
+    base = {
+        IntentType.CONVERSATIONAL: _DEFAULT_L2_CEILING,
+        IntentType.TASK: _DEFAULT_L2_CEILING,
+        IntentType.MEMORY_LOOKUP: _MEMORY_LOOKUP_L2_CEILING,
+    }.get(intent, _DEFAULT_L2_CEILING)
+    return base * (2 if retry_attempt > 0 else 1)
 
 
 class ContextBroker:
@@ -43,7 +50,7 @@ class ContextBroker:
         goal: str,
         retry_attempt: int = 0,
     ) -> SecretaryContextRequest:
-        ceiling = _l2_ceiling(retry_attempt)
+        ceiling = _l2_ceiling(intent, retry_attempt)
         wm = self._wm.with_ceiling(ceiling)
         wm.compact_if_needed()
 

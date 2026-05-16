@@ -134,3 +134,47 @@ def test_total_tokens_includes_all_levels():
     # total = identity tokens + wm tokens
     identity_tokens = len("Sei Zarsuit") // 4
     assert ctx.total_tokens >= identity_tokens + 200
+
+
+def test_retry_doubles_ceiling_for_memory_lookup(tmp_path):
+    """Il retry su MEMORY_LOOKUP raddoppia il proprio tetto (4K → 8K)."""
+    index = tmp_path / "index.md"
+    index.write_text("contenuto di test", encoding="utf-8")
+    # 10 turni da 1500 token = 15000 totale
+    # MEMORY_LOOKUP normale: ceiling 4000 → compatta
+    # MEMORY_LOOKUP retry: ceiling 8000 → tiene di più
+    turns = [_turn(1500) for _ in range(10)]
+    broker = _broker(turns=turns, recall_index=index)
+
+    ctx_normal = broker.compose(
+        request_id="r1", session_id="s1", attestation=_attestation(),
+        intent=IntentType.MEMORY_LOOKUP, goal="riunione",
+        retry_attempt=0,
+    )
+    ctx_retry = broker.compose(
+        request_id="r1", session_id="s1", attestation=_attestation(),
+        intent=IntentType.MEMORY_LOOKUP, goal="riunione",
+        retry_attempt=1,
+    )
+    assert ctx_retry.working_memory_tokens > ctx_normal.working_memory_tokens
+    assert ctx_retry.working_memory_tokens <= 8000  # tetto retry MEMORY_LOOKUP
+
+
+def test_retry_ceiling_is_per_category_not_global(tmp_path):
+    """Verifica che il × 2 si applichi sulla categoria, non sempre a 4K."""
+    turns = [_turn(1000) for _ in range(7)]
+    broker = _broker(turns=turns)
+
+    # CONVERSATIONAL retry: 4K × 2 = 8K
+    ctx_conv = broker.compose(
+        request_id="r1", session_id="s1", attestation=_attestation(),
+        intent=IntentType.CONVERSATIONAL, goal="test", retry_attempt=1,
+    )
+    assert ctx_conv.working_memory_tokens <= 8000
+
+    # MEMORY_LOOKUP retry: 4K × 2 = 8K (in questo design base e default coincidono)
+    ctx_ml = broker.compose(
+        request_id="r1", session_id="s1", attestation=_attestation(),
+        intent=IntentType.MEMORY_LOOKUP, goal="test", retry_attempt=1,
+    )
+    assert ctx_ml.working_memory_tokens <= 8000
