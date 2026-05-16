@@ -56,6 +56,6 @@ def _apply_env_overrides(data: dict[str, Any]) -> None:
     if vault_path := os.getenv("SEGRETARIO_VAULT_PATH"):
         data.setdefault("vault", {})["path"] = vault_path
     if model := os.getenv("SEGRETARIO_OLLAMA_MODEL"):
-        data.setdefault("llm", {})["model"] = model
+        data.setdefault("llm", {})["sync_model"] = model
     if base_url := os.getenv("SEGRETARIO_OLLAMA_BASE_URL"):
         data.setdefault("llm", {})["base_url"] = base_url

@@ -69,7 +69,6 @@ app.add_typer(repair_app, name="repair")
 app.add_typer(extract_app, name="extract")
 app.add_typer(ocr_app, name="ocr")
 
-
 def _echo(message: object = "", *, debug: bool = False) -> None:
     text = sanitize_user_output(message, debug=debug)
     try:
@@ -108,7 +107,7 @@ def status(
         f"Config:       {config_display}",
         f"Vault:        {settings.vault.path}",
         f"Vault check:  {vault_status}",
-        f"LLM:          {settings.llm.provider} / {settings.llm.model}",
+        f"LLM:          {settings.llm.provider} / {settings.llm.sync_model}",
         f"Ollama:       {ollama_status}",
         f"Taskboard:    {taskboard_status}",
         f"Audit:        {audit_status}",
@@ -819,6 +818,16 @@ def _run_work_cycle(settings, *, limit: int) -> None:
         suffix = f" -> {output_ref}" if output_ref else ""
         _echo(f"- {task_id}: {command} {status}{suffix}")
 
+    ingest_queued = _queue_ingest_tasks(settings, limit=limit)
+    _echo(f"Queued ingest tasks: {len(ingest_queued)}")
+    for task_id, marker_path in ingest_queued:
+        _echo(f"- {task_id}: {marker_path}")
+    ingest_executed = _run_agent_batch(settings, limit=limit)
+    _echo(f"Executed ingest tasks: {len(ingest_executed)}")
+    for task_id, command, status, output_ref in ingest_executed:
+        suffix = f" -> {output_ref}" if output_ref else ""
+        _echo(f"- {task_id}: {command} {status}{suffix}")
+
 
 def _run_one_agent_task(settings) -> tuple[int, str, str, str | None] | None:
     taskboard = TaskboardStore(settings.taskboard.sqlite_path)
@@ -1444,6 +1453,7 @@ def _queue_ocr_tasks(settings, *, limit: int) -> list[tuple[int, str]]:
                 "marker_path": marker_path,
                 "action": "ocr.pdf",
                 "skip_paths": settings.vault.skip_paths,
+                "tesseract_cmd": settings.ocr.tesseract_cmd,
             },
             risk="low",
             action=PermissionKernel.OUTPUT_WRITE,
@@ -1496,6 +1506,76 @@ def _ocr_needs_ocr_markers(
         if metadata.get("status") == "needs_ocr" and isinstance(metadata.get("source_path"), str):
             markers.append(relative)
     return markers
+
+
+_INGEST_READY_STATUSES = {"extracted", "ocr_extracted"}
+
+
+def _ingest_ready_markers(
+    vault_path: Path,
+    *,
+    skip_paths: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    vault = Path(vault_path)
+    extracted_dir = vault / "raw" / "extracted"
+    if not extracted_dir.exists():
+        return []
+    ready: list[str] = []
+    for marker in sorted(extracted_dir.rglob("*.md")):
+        if not marker.is_file():
+            continue
+        relative = marker.relative_to(vault).as_posix()
+        if matches_configured_skip_path(relative, skip_paths):
+            continue
+        metadata, _body = parse_frontmatter(marker.read_text(encoding="utf-8", errors="replace"))
+        if metadata.get("status") in _INGEST_READY_STATUSES:
+            ready.append(relative)
+    return ready
+
+
+def _queue_ingest_tasks(settings, *, limit: int) -> list[tuple[int, str]]:
+    taskboard = TaskboardStore(settings.taskboard.sqlite_path)
+    taskboard.initialize()
+    payload_store = TaskPayloadStore(settings.taskboard.sqlite_path.parent)
+    active_sources = _active_ingest_sources(taskboard, payload_store)
+    candidates = [
+        marker_path
+        for marker_path in _ingest_ready_markers(settings.vault.path, skip_paths=settings.vault.skip_paths)
+        if marker_path not in active_sources
+    ][:limit]
+    audit = AuditLog(
+        events_path=settings.audit.events_path,
+        chain_path=settings.audit.hash_chain_path,
+    )
+    queued: list[tuple[int, str]] = []
+    for marker_path in candidates:
+        request = TaskRequest(
+            command="ingest",
+            payload={
+                "vault_path": settings.vault.path,
+                "source_path": marker_path,
+                "action": "ingest",
+                "auto": True,
+                "skip_paths": settings.vault.skip_paths,
+            },
+            risk="low",
+            action=PermissionKernel.KNOWLEDGE_WRITE,
+            source="ingest",
+            requested_by="segretario",
+        )
+        task = taskboard.create_task(
+            source="ingest",
+            requested_by="segretario",
+            command="ingest",
+            risk="low",
+            assigned_agent="agent-runner",
+            input_ref="pending",
+        )
+        payload_ref = payload_store.save(int(task["id"]), request)
+        taskboard.update_input_ref(int(task["id"]), payload_ref)
+        audit.append_event("ingest.task_queued", {"task_id": task["id"], "marker_path": marker_path})
+        queued.append((int(task["id"]), marker_path))
+    return queued
 
 
 def _extract_plan_candidates(items: list[str], *, kind: str) -> list[str]:

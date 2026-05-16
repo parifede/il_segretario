@@ -20,7 +20,9 @@ class VaultSettings(BaseModel):
 
 class LLMSettings(BaseModel):
     provider: str = "ollama"
-    model: str = "local-model-name"
+    sync_model: str = "local-model-name"
+    async_model: str = "qwen3.5:latest"
+    async_model_timeout_seconds: int = 300
     base_url: str = "http://127.0.0.1:11434"
     temperature: float = 0.2
     timeout_seconds: int = 120
@@ -72,6 +74,24 @@ class SchedulerSettings(BaseModel):
     no_user_notification_unless_useful: bool = True
 
 
+class OcrSettings(BaseModel):
+    tesseract_cmd: str | None = None
+
+
+class CharacterSettings(BaseModel):
+    identity: str = (
+        "Sei Zarsuit, l'assistente personale di zarsOS. "
+        "Sei preciso, discreto e orientato all'azione. "
+        "Conosci il contesto dell'utente attraverso il Vault locale."
+    )
+
+
+class ZarsuitSettings(BaseModel):
+    client: str = "stub"
+    stub_response_file: str | None = None
+    ux_timeout_seconds: float = 3.0
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -84,6 +104,9 @@ class Settings(BaseModel):
     web: WebSettings = Field(default_factory=WebSettings)
     google: GoogleSettings = Field(default_factory=GoogleSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
+    character: CharacterSettings = Field(default_factory=CharacterSettings)
+    zarsuit: ZarsuitSettings = Field(default_factory=ZarsuitSettings)
     loaded_config_path: Path | None = None
 
     def to_safe_dict(self) -> dict[str, Any]:

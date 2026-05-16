@@ -43,7 +43,7 @@ project_name: il_segretario
 vault:
   path: "E:\\\\from_config"
 llm:
-  model: "from-config"
+  sync_model: "from-config"
   base_url: "http://127.0.0.1:11434"
 """.strip(),
         encoding="utf-8",
@@ -54,4 +54,4 @@ llm:
     settings = load_settings(config_path=config)
 
     assert settings.vault.path == Path("E:\\from_env")
-    assert settings.llm.model == "from-env"
+    assert settings.llm.sync_model == "from-env"
