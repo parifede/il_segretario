@@ -97,7 +97,7 @@ def test_repair_raw_plan_cli_limits_user_output_while_report_stays_complete(
 
     result = CliRunner().invoke(app, ["repair", "raw-plan", "--limit", "1"])
 
-    report = (vault / "output" / "repair-raw-plan-2026-05-14.md")
+    report = (vault / "output" / f"repair-raw-plan-{date.today().isoformat()}.md")
     assert result.exit_code == 0
     assert "raw/articles/first.md" in result.output
     assert "raw/articles/second.md" not in result.output
