@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+# num_ctx limits the KV cache allocation. Qwen 3.5 declares 256K context but
+# consolidation never needs more than ~6K tokens. Without this, Ollama tries to
+# allocate ~8 GB of KV cache on a 16 GB GPU, causing OOM.
+_ASYNC_CONTEXT_WINDOW = 8192  # tokens; consolidation uses short sessions
+
 import httpx
 
 from segretario.config.settings import LLMSettings
@@ -114,7 +119,7 @@ class OllamaAsyncLLMClient:
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
-                        "options": {"temperature": 0.2},
+                        "options": {"temperature": 0.2, "num_ctx": _ASYNC_CONTEXT_WINDOW},
                         # keep_alive=0: scarica async_model immediatamente dopo l'inferenza.
                         # Coerente con il design (PDF sezione 3.3): scarica sync_model ->
                         # carica async_model -> consolidamento -> scarica async_model ->
