@@ -196,6 +196,35 @@ def session_close(
     _echo(f"Sessione {session.session_id} chiusa.")
 
 
+@session_app.command("consolidate")
+def session_consolidate(
+    session_id: str = typer.Option(..., "--session-id", help="ID sessione da consolidare"),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Esegue il consolidamento di una sessione (richiede Ollama + async_model)."""
+    from pathlib import Path as _Path
+    from segretario.connectors.async_llm_client import build_async_client
+    from segretario.flow02.session.consolidation import ConsolidationJob
+
+    settings = load_settings(config_path=config)
+    session_jsonl = _Path(settings.taskboard.sqlite_path).parent / "sessions" / f"session_{session_id}.jsonl"
+    if not session_jsonl.exists():
+        _echo(f"Sessione non trovata: {session_jsonl}")
+        raise typer.Exit(1)
+
+    client = build_async_client(settings.llm)
+    job = ConsolidationJob(client=client)
+    result = job.run(session_jsonl, _Path(settings.vault.path))
+
+    if result.ok:
+        _echo(f"Consolidamento ok: {result.message}")
+        for item in result.extracted_facts:
+            _echo(f"  - {item}")
+    else:
+        _echo(f"Consolidamento fallito: {result.message}")
+        raise typer.Exit(1)
+
+
 def _echo(message: object = "", *, debug: bool = False) -> None:
     text = sanitize_user_output(message, debug=debug)
     try:
