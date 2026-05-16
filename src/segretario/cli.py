@@ -69,6 +69,72 @@ app.add_typer(repair_app, name="repair")
 app.add_typer(extract_app, name="extract")
 app.add_typer(ocr_app, name="ocr")
 
+# sub-app zarsuit — Flow 02
+zarsuit_app = typer.Typer(name="zarsuit", help="Flow 02: protocollo Zarsuit.")
+app.add_typer(zarsuit_app)
+
+
+@zarsuit_app.command("context-request")
+def zarsuit_context_request(
+    request_id: str = typer.Option(..., "--request-id", help="UUID richiesta utente"),
+    goal: str = typer.Option(..., "--goal", help="Obiettivo visibile all'utente"),
+    intent: str = typer.Option("conversational", "--intent",
+                               help="conversational | task | memory_lookup"),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Invia una richiesta a Zarsuit (stub) e mostra il risultato."""
+    from pathlib import Path as _Path
+    from segretario.flow02.attestation import AttestationBuilder
+    from segretario.flow02.character_store import CharacterStore
+    from segretario.flow02.context_broker import ContextBroker
+    from segretario.flow02.models import DetailLevel, IntentType, OutputPolicy
+    from segretario.flow02.output_guard import OutputGuard
+    from segretario.flow02.recall_engine import RecallEngine
+    from segretario.flow02.retry_loop import RetryLoop
+    from segretario.flow02.working_memory import WorkingMemory
+    from segretario.flow02.zarsuit_client import ZarsuitClientStub
+
+    settings = load_settings(config_path=config)
+    try:
+        intent_type = IntentType(intent)
+    except ValueError:
+        _echo("intent non valido: " + intent + ". Valori: conversational, task, memory_lookup")
+        raise typer.Exit(1)
+
+    broker = ContextBroker(
+        character_store=CharacterStore.from_config(settings.character.identity),
+        working_memory=WorkingMemory(4000),
+        recall_engine=RecallEngine(_Path(settings.vault.path) / "meta" / "index.md"),
+    )
+    att = AttestationBuilder().build(
+        request_id=request_id,
+        internal_request_id=request_id + "-i1",
+        approved_context_projection=["vault", "calendar", "contacts"],
+        output_policy=OutputPolicy.FREE,
+        max_detail_level=DetailLevel.OPERATIONAL,
+        allowed_next_steps=[],
+        user_visible_goal=goal,
+    )
+    stub = ZarsuitClientStub(
+        responses_file=_Path(settings.zarsuit.stub_response_file)
+        if settings.zarsuit.stub_response_file else None
+    )
+    messages: list[str] = []
+    loop = RetryLoop(
+        client=stub, guard=OutputGuard(), broker=broker,
+        on_ux_message=lambda msg: (_echo("[ux] " + msg), messages.append(msg)),
+    )
+    result = loop.run(
+        request_id=request_id, session_id="cli-session",
+        user_message=goal, intent=intent_type,
+        goal=goal, attestation=att,
+    )
+    if result.ok:
+        _echo(result.message)
+    else:
+        _echo("[fail] " + result.message)
+        raise typer.Exit(1)
+
 def _echo(message: object = "", *, debug: bool = False) -> None:
     text = sanitize_user_output(message, debug=debug)
     try:
