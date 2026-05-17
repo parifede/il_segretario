@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from segretario.audit import AuditLog
@@ -541,7 +541,6 @@ def _run_recall_reindex(settings: Settings) -> str:
     from segretario.recall.embedder import OllamaEmbedder
     from segretario.recall.sqlite_vec_store import SqliteVecStore
     from segretario.recall.chunker import WholeNoteChunker
-    from datetime import datetime, timezone
 
     state = ReindexStateStore(settings.recall.state_path)
     now = datetime.now(timezone.utc)
