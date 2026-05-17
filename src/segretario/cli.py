@@ -2709,6 +2709,11 @@ def recall_reindex(
     settings = load_settings(config_path=config)
     recall = settings.recall
 
+    recall_cfg = settings.recall
+    if not recall_cfg.enabled:
+        typer.echo("Recall is disabled in config (recall.enabled=false). Nothing to reindex.")
+        raise typer.Exit(0)
+
     if force:
         _echo("Recall index: force reindexing all notes...")
     else:
