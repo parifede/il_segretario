@@ -78,6 +78,10 @@ def ingest_article(vault_path: Path | str, source_path: Path | str, *, auto: boo
     _append_log(vault, relative_source, target_relative)
     _add_inbound_links(vault, title, target_relative)
 
+    # Recall index invalidation — best effort, never blocks ingest
+    from segretario.recall._ingest_hook import _invalidate_recall
+    _invalidate_recall(vault, target)
+
     return IngestResult(path=target_relative, title=title, updated=updated)
 
 

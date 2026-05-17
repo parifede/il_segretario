@@ -175,6 +175,11 @@ def extract_pdf(
         encoding="utf-8",
     )
     append_log(vault, f"- {date.today().isoformat()} extract {relative_source} -> {target_relative}")
+
+    # Recall index invalidation — best effort, never blocks extraction
+    from segretario.recall._ingest_hook import _invalidate_recall
+    _invalidate_recall(vault, target)
+
     return {"path": target_relative, "source_path": relative_source}
 
 
@@ -232,6 +237,11 @@ def ocr_pdf(
         encoding="utf-8",
     )
     append_log(vault, f"- {date.today().isoformat()} ocr {relative_source} -> {relative_marker}")
+
+    # Recall index invalidation — best effort, never blocks OCR extraction
+    from segretario.recall._ingest_hook import _invalidate_recall
+    _invalidate_recall(vault, marker)
+
     return {"path": relative_marker, "source_path": relative_source}
 
 
