@@ -53,6 +53,7 @@ agents_app = typer.Typer(help="Agent worker commands.")
 repair_app = typer.Typer(help="Vault repair commands.")
 extract_app = typer.Typer(help="Rich source extraction planning commands.")
 ocr_app = typer.Typer(help="Local OCR queue commands.")
+recall_app = typer.Typer(help="Semantic recall index commands.")
 app.add_typer(config_app, name="config")
 app.add_typer(vault_app, name="vault")
 app.add_typer(lint_app, name="lint")
@@ -68,6 +69,7 @@ app.add_typer(agents_app, name="agents")
 app.add_typer(repair_app, name="repair")
 app.add_typer(extract_app, name="extract")
 app.add_typer(ocr_app, name="ocr")
+app.add_typer(recall_app, name="recall")
 
 # sub-app zarsuit — Flow 02
 zarsuit_app = typer.Typer(name="zarsuit", help="Flow 02: protocollo Zarsuit.")
@@ -2682,4 +2684,212 @@ def _ollama_status(base_url: str) -> str:
         return "reachable" if response.status_code < 500 else "unreachable"
     except Exception:
         return "unreachable"
+
+
+# ---------------------------------------------------------------------------
+# recall sub-app commands
+# ---------------------------------------------------------------------------
+
+@recall_app.command("reindex")
+def recall_reindex(
+    force: bool = typer.Option(False, "--force", help="Re-embed all notes regardless of hash."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report changes without writing (not yet implemented)."),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Reindex the vault for semantic recall."""
+    if dry_run:
+        _echo("Recall index: DRY RUN — would scan vault and report changes without writing")
+        _echo("(dry-run not yet implemented in VaultIndexer)")
+        return
+
+    from segretario.recall.embedder import OllamaEmbedder
+    from segretario.recall.indexer import VaultIndexer
+    from segretario.recall.sqlite_vec_store import SqliteVecStore
+
+    settings = load_settings(config_path=config)
+    recall = settings.recall
+
+    if force:
+        _echo("Recall index: force reindexing all notes...")
+    else:
+        _echo("Recall index: reindexing...")
+
+    try:
+        embedder = OllamaEmbedder(
+            model=recall.embedding_model,
+            base_url=recall.ollama_base_url,
+        )
+        store = SqliteVecStore(
+            db_path=recall.db_path,
+            embedding_model=recall.embedding_model,
+        )
+        indexer = VaultIndexer(
+            vault_path=settings.vault.path,
+            store=store,
+            embedder=embedder,
+            skip_paths=recall.skip_paths,
+        )
+        result = indexer.reindex(force=force)
+    except Exception as exc:
+        _echo(f"Reindex failed: {exc}")
+        raise typer.Exit(1) from exc
+
+    _echo(
+        f"Reindex complete: indexed={result.indexed} deleted={result.deleted} "
+        f"skipped_unchanged={result.skipped_unchanged} errors={len(result.errors)}"
+    )
+    if result.errors:
+        for err in result.errors[:10]:
+            _echo(f"  error: {err}")
+
+
+@recall_app.command("status")
+def recall_status(
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Show the recall subsystem status."""
+    import json as _json
+
+    from segretario.recall.health import check_embedder, check_store
+
+    settings = load_settings(config_path=config)
+    recall = settings.recall
+
+    _echo("Recall status:")
+    _echo(f"  Enabled:        {str(recall.enabled).lower()}")
+    _echo(f"  Model:          {recall.embedding_model}")
+    _echo(f"  DB:             {recall.db_path}")
+
+    # Last reindex info from state file
+    state_path = recall.state_path
+    last_reindex_str = "never"
+    if state_path.exists():
+        try:
+            data = _json.loads(state_path.read_text(encoding="utf-8"))
+            last_run = data.get("last_run", "")
+            indexed_count = data.get("indexed_count", "?")
+            if last_run:
+                last_reindex_str = f"{last_run} ({indexed_count} notes)"
+        except Exception:
+            last_reindex_str = "(corrupt state file)"
+    _echo(f"  Last reindex:   {last_reindex_str}")
+
+    if not recall.enabled:
+        _echo("  Embedder:       (not checked — recall disabled)")
+        _echo("  Store:          (not checked — recall disabled)")
+        return
+
+    # Check embedder health
+    from segretario.recall.embedder import OllamaEmbedder
+    from segretario.recall.sqlite_vec_store import SqliteVecStore
+
+    try:
+        embedder = OllamaEmbedder(
+            model=recall.embedding_model,
+            base_url=recall.ollama_base_url,
+        )
+        embedder_ok, embedder_reason = check_embedder(embedder)
+        _echo(f"  Embedder:       {'OK' if embedder_ok else 'FAIL: ' + embedder_reason}")
+    except Exception as exc:
+        _echo(f"  Embedder:       FAIL: {exc}")
+
+    try:
+        store = SqliteVecStore(
+            db_path=recall.db_path,
+            embedding_model=recall.embedding_model,
+        )
+        store_ok, store_reason = check_store(store)
+        _echo(f"  Store:          {'OK' if store_ok else 'FAIL: ' + store_reason}")
+    except Exception as exc:
+        _echo(f"  Store:          FAIL: {exc}")
+
+
+@recall_app.command("search")
+def recall_search(
+    query: str = typer.Argument(..., help="Search query."),
+    k: int = typer.Option(5, "--k", help="Number of results to return."),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Search the vault using semantic recall."""
+    from segretario.flow02.recall_engine import RecallEngine
+    from segretario.recall.models import RecallEngineState, RecallMode
+
+    settings = load_settings(config_path=config)
+    vault_path = settings.vault.path
+    index_path = vault_path / "meta" / "index.md"
+
+    engine = RecallEngine(index_path=index_path, recall_settings=settings.recall)
+    result = engine.recall(query, k=k)
+
+    _echo(f"State:  {result.state.value}")
+    _echo(f"Mode:   {result.mode_used.value}")
+
+    if result.hits:
+        _echo("Hits:")
+        for hit in result.hits:
+            _echo(f"  {hit.note_path} (score {hit.score:.3f})")
+            if hit.content_preview:
+                preview_line = hit.content_preview.splitlines()[0][:120] if hit.content_preview else ""
+                if preview_line:
+                    _echo(f'    "{preview_line}"')
+
+    if result.wizard_required is not None:
+        _echo(f"Wizard: {result.wizard_required.value}")
+        if result.wizard_context:
+            for key, val in result.wizard_context.items():
+                _echo(f"Context: {key}={val}")
+    else:
+        _echo("Wizard: None")
+
+
+@recall_app.command("reset-wizard")
+def recall_reset_wizard(
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Reset the recall activation wizard (set user_dismissed_wizard to False)."""
+    import tempfile
+    import os
+
+    settings = load_settings(config_path=config)
+
+    # Determine the config file to update
+    config_path = settings.loaded_config_path
+    if config_path is None:
+        config_path = default_config_path()
+        if not config_path.exists():
+            _echo("No segretario.yaml found. Create one first.")
+            raise typer.Exit(1)
+
+    # Load raw YAML
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        _echo("Invalid config file format.")
+        raise typer.Exit(1)
+
+    # Update recall.user_dismissed_wizard
+    if "recall" not in raw or not isinstance(raw.get("recall"), dict):
+        raw["recall"] = {}
+    raw["recall"]["user_dismissed_wizard"] = False
+
+    # Write back atomically
+    new_content = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=config_path.parent,
+        suffix=".tmp",
+        prefix=config_path.stem + "_",
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        os.replace(tmp_path, config_path)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        _echo(f"Failed to write config: {exc}")
+        raise typer.Exit(1) from exc
+
+    _echo("Wizard reset: user_dismissed_wizard set to False.")
+    _echo("Run 'segretario recall search' to trigger the activation wizard again.")
 
