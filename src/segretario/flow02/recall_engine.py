@@ -170,7 +170,7 @@ class RecallEngine:
         return keyword_search(self._index_path, query, max_tokens)
 
 
-def _hits_to_text(hits) -> str:
+def _hits_to_text(hits: list) -> str:
     """Format RecallHit list as text block for LLM context."""
     parts = []
     for hit in hits:

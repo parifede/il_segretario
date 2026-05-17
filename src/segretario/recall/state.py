@@ -45,6 +45,11 @@ class ReindexStateStore:
         last = self.get_last_run()
         if last is None:
             return False
+        # Normalize to UTC to handle aware/naive datetime mixing
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         elapsed = (now - last).total_seconds() / 60
         return elapsed < threshold_minutes
 
