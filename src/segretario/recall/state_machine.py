@@ -114,7 +114,7 @@ class RecallStateMachine:
                 "con parafrasi e sinonimi, non solo parole esatte."
             ),
             "performance_note": (
-                f"La prima indicizzazione richiede ~5-10 minuti per il tuo vault."
+                "La prima indicizzazione richiede ~5-10 minuti per il tuo vault."
             ),
             "model": self._settings.embedding_model,
         }
