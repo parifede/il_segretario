@@ -38,7 +38,7 @@ def test_recall_engine_returns_recall_result_when_enabled_and_healthy(tmp_path: 
         # Also patch the retriever so no real Ollama call happens
         mock_retriever = MagicMock()
         mock_retriever.search.return_value = [
-            RecallHit(note_path="some/note.md", score=0.1, content_preview="preview")
+            RecallHit(note_path="some/note.md", chunk_index=0, section_title=None, score=0.1, content_preview="preview")
         ]
         engine._retriever = mock_retriever
 
@@ -98,7 +98,7 @@ def test_recall_engine_recall_simple_returns_content_when_ready(tmp_path: Path):
     with patch.object(engine._state_machine, "evaluate", return_value=(RecallEngineState.SEMANTIC_READY, None, {})):
         mock_retriever = MagicMock()
         mock_retriever.search.return_value = [
-            RecallHit(note_path="some/note.md", score=0.1, content_preview="preview text")
+            RecallHit(note_path="some/note.md", chunk_index=0, section_title=None, score=0.1, content_preview="preview text")
         ]
         engine._retriever = mock_retriever
 

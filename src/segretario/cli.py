@@ -2739,6 +2739,16 @@ def recall_reindex(
         _echo(f"Reindex failed: {exc}")
         raise typer.Exit(1) from exc
 
+    from datetime import datetime, timezone
+    from segretario.recall.state import ReindexStateStore
+
+    state_store = ReindexStateStore(settings.recall.state_path)
+    state_store.set_last_run(
+        datetime.now(timezone.utc),
+        result.indexed,
+        settings.recall.embedding_model,
+    )
+
     _echo(
         f"Reindex complete: indexed={result.indexed} deleted={result.deleted} "
         f"skipped_unchanged={result.skipped_unchanged} errors={len(result.errors)}"
@@ -2832,11 +2842,12 @@ def recall_search(
     if result.hits:
         _echo("Hits:")
         for hit in result.hits:
-            _echo(f"  {hit.note_path} (score {hit.score:.3f})")
-            if hit.content_preview:
-                preview_line = hit.content_preview.splitlines()[0][:120] if hit.content_preview else ""
-                if preview_line:
-                    _echo(f'    "{preview_line}"')
+            if hit.section_title:
+                location = f"{hit.note_path} [§ {hit.section_title}] (chunk {hit.chunk_index}, score {hit.score:.3f})"
+            else:
+                location = f"{hit.note_path} (chunk {hit.chunk_index}, score {hit.score:.3f})"
+            _echo(f"  {location}")
+            _echo(f'    "{hit.content_preview[:100]}..."')
 
     if result.wizard_required is not None:
         _echo(f"Wizard: {result.wizard_required.value}")

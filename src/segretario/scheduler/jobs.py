@@ -540,7 +540,7 @@ def _run_recall_reindex(settings: Settings) -> str:
     from segretario.recall.indexer import VaultIndexer
     from segretario.recall.embedder import OllamaEmbedder
     from segretario.recall.sqlite_vec_store import SqliteVecStore
-    from segretario.recall.chunker import WholeNoteChunker
+    from segretario.recall.chunker import H2OverlapChunker
 
     state = ReindexStateStore(settings.recall.state_path)
     now = datetime.now(timezone.utc)
@@ -566,7 +566,7 @@ def _run_recall_reindex(settings: Settings) -> str:
             vault_path=vault_path,
             store=store,
             embedder=embedder,
-            chunker=WholeNoteChunker(),
+            chunker=H2OverlapChunker(),
             skip_paths=settings.recall.skip_paths,
         )
         result = indexer.reindex()

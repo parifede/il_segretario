@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -181,7 +181,7 @@ def test_indexer_indexes_self_directory(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_indexer_handles_single_note_embed_failure(tmp_path: Path):
-    """Mock embedder raises EmbedderError for 1 note → that note in errors, others indexed."""
+    """Mock embedder raises EmbedderError for all chunks of 1 note → no chunks indexed for that note, others ok."""
     (tmp_path / "good1.md").write_text("# Good1\ncontent\n", encoding="utf-8")
     (tmp_path / "bad.md").write_text("# Bad\ncontent\n", encoding="utf-8")
     (tmp_path / "good2.md").write_text("# Good2\ncontent\n", encoding="utf-8")
@@ -200,6 +200,84 @@ def test_indexer_handles_single_note_embed_failure(tmp_path: Path):
 
     result = indexer.reindex()
 
+    # good1 and good2 indexed; bad.md has no chunk that succeeds → not counted
     assert result.indexed == 2
-    assert len(result.errors) == 1
-    assert "bad.md" in result.errors[0]
+    # EmbedderErrors on individual chunks are NOT counted as errors (logged as ERROR but not stored)
+    assert len(result.errors) == 0
+
+
+# ---------------------------------------------------------------------------
+# test: chunk-level indexing — note counts once even with multiple chunks
+# ---------------------------------------------------------------------------
+
+def test_indexer_counts_note_indexed_not_chunks(tmp_path: Path):
+    """indexed counter increments per note, not per chunk."""
+    # Create a note that produces multiple chunks (> CHUNK_TARGET_SIZE = 1500 chars)
+    content = "# Big Note\n" + "X" * 5000
+    (tmp_path / "big.md").write_text(content, encoding="utf-8")
+
+    embedder = _make_embedder()
+    store = _make_store()
+    indexer = VaultIndexer(vault_path=tmp_path, store=store, embedder=embedder)
+
+    result = indexer.reindex()
+
+    assert result.indexed == 1  # one note, not len(chunks)
+    # But store should have multiple chunks
+    paths = store.list_indexed_paths()
+    assert "big.md" in paths
+
+
+# ---------------------------------------------------------------------------
+# test: partial chunk failure still indexes note
+# ---------------------------------------------------------------------------
+
+def test_indexer_partial_chunk_failure_still_indexes_note(tmp_path: Path):
+    """If one chunk fails embed, note is still counted as indexed (partial)."""
+    # Note big enough to produce multiple chunks
+    content = "# Note\n" + "A" * 5000
+    (tmp_path / "partial.md").write_text(content, encoding="utf-8")
+
+    embedder = MagicMock(spec=OllamaEmbedder)
+    call_count = {"n": 0}
+
+    def embed_side_effect(text: str) -> list[float]:
+        call_count["n"] += 1
+        if call_count["n"] == 2:  # fail on second chunk
+            raise EmbedderError("chunk 1 fail")
+        return [0.1] * 1024
+
+    embedder.embed.side_effect = embed_side_effect
+
+    store = _make_store()
+    indexer = VaultIndexer(vault_path=tmp_path, store=store, embedder=embedder)
+
+    result = indexer.reindex()
+
+    # Note is counted as indexed (chunk 0 succeeded)
+    assert result.indexed == 1
+    # EmbedderError on chunk is NOT in errors list
+    assert len(result.errors) == 0
+
+
+# ---------------------------------------------------------------------------
+# test: skip logic uses note_hash
+# ---------------------------------------------------------------------------
+
+def test_indexer_uses_note_hash_for_skip(tmp_path: Path):
+    """Skip logic uses note_hash; same content → skipped on second run."""
+    note = tmp_path / "stable.md"
+    note.write_text("# Stable\nsome content\n", encoding="utf-8")
+
+    embedder = _make_embedder()
+    store = _make_store()
+    indexer = VaultIndexer(vault_path=tmp_path, store=store, embedder=embedder)
+
+    first = indexer.reindex()
+    assert first.indexed == 1
+
+    second = indexer.reindex()
+    assert second.skipped_unchanged == 1
+    assert second.indexed == 0
+    # embedder called only during first run
+    assert embedder.embed.call_count == first.indexed  # called once per chunk in first run

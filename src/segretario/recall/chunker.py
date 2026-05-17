@@ -1,23 +1,107 @@
 from __future__ import annotations
-from pathlib import Path
-from typing import Protocol
+import re
+
+from segretario.recall.models import Chunk
 
 
-class Chunk:
-    """A piece of text to embed. Today always the full note content."""
-    def __init__(self, text: str, source_path: str) -> None:
-        self.text = text
-        self.source_path = source_path
+CHUNK_TARGET_SIZE = 1500
+CHUNK_OVERLAP_SIZE = 200
+
+H2_PATTERN = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 
 
-class Chunker(Protocol):
-    def chunk(self, path: Path, content: str) -> list[Chunk]:
-        """Split content into chunks. Protocol allows future strategies."""
-        ...
+class H2OverlapChunker:
+    """Chunker che divide note per sezioni H2 con overlap.
 
+    Logica:
+    - Note senza H2 e <= CHUNK_TARGET_SIZE: 1 chunk = nota intera
+    - Note senza H2 e > CHUNK_TARGET_SIZE: split per blocchi di ~CHUNK_TARGET_SIZE
+      con overlap di CHUNK_OVERLAP_SIZE
+    - Note con H2: ogni sezione H2 e' un chunk (preceduta da overlap della sezione
+      precedente). Se una sezione supera CHUNK_TARGET_SIZE, viene a sua volta
+      splittata internamente con stessa logica.
+    """
 
-class WholeNoteChunker:
-    """Returns the entire note as a single chunk. One note = one vector."""
+    def chunk(self, note_path: str, content: str) -> list[Chunk]:
+        if not content.strip():
+            return []
 
-    def chunk(self, path: Path, content: str) -> list[Chunk]:
-        return [Chunk(text=content, source_path=str(path))]
+        sections = self._split_by_h2(content)
+
+        if not sections:
+            return self._chunk_plain_text(note_path, content, section_title=None)
+
+        chunks: list[Chunk] = []
+        previous_tail = ""
+
+        for section_title, section_content in sections:
+            content_with_overlap = (previous_tail + section_content).strip()
+            section_chunks = self._chunk_plain_text(
+                note_path,
+                content_with_overlap,
+                section_title=section_title,
+                start_index=len(chunks),
+            )
+            chunks.extend(section_chunks)
+            previous_tail = section_content[-CHUNK_OVERLAP_SIZE:] if len(section_content) > CHUNK_OVERLAP_SIZE else section_content
+
+        return chunks
+
+    def _split_by_h2(self, content: str) -> list[tuple[str, str]]:
+        matches = list(H2_PATTERN.finditer(content))
+        if not matches:
+            return []
+
+        sections: list[tuple[str, str]] = []
+        preamble = content[:matches[0].start()].strip()
+
+        for i, match in enumerate(matches):
+            title = match.group(1).strip()
+            start = match.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            section_content = content[start:end].strip()
+            if i == 0 and preamble:
+                section_content = preamble + "\n\n" + section_content
+            sections.append((title, section_content))
+
+        return sections
+
+    def _chunk_plain_text(
+        self,
+        note_path: str,
+        text: str,
+        section_title: str | None,
+        start_index: int = 0,
+    ) -> list[Chunk]:
+        if not text.strip():
+            return []
+
+        if len(text) <= CHUNK_TARGET_SIZE:
+            return [Chunk(
+                note_path=note_path,
+                chunk_index=start_index,
+                section_title=section_title,
+                content=text,
+                char_count=len(text),
+            )]
+
+        chunks: list[Chunk] = []
+        idx = start_index
+        pos = 0
+
+        while pos < len(text):
+            end = min(pos + CHUNK_TARGET_SIZE, len(text))
+            chunk_content = text[pos:end]
+            chunks.append(Chunk(
+                note_path=note_path,
+                chunk_index=idx,
+                section_title=section_title,
+                content=chunk_content,
+                char_count=len(chunk_content),
+            ))
+            idx += 1
+            if end >= len(text):
+                break
+            pos = end - CHUNK_OVERLAP_SIZE
+
+        return chunks

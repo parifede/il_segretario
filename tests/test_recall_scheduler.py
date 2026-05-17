@@ -65,3 +65,40 @@ def test_scheduler_recall_reindex_job_skips_if_disabled(tmp_path: Path):
     result = _run_recall_reindex(settings)
 
     assert "disabled" in result or "skipped" in result
+
+
+# ---------------------------------------------------------------------------
+# test: state updated even when indexed=0
+# ---------------------------------------------------------------------------
+
+def test_reindex_job_updates_state_when_indexed_zero(tmp_path: Path):
+    """State is updated even when reindex skips all notes (unchanged, indexed=0)."""
+    from segretario.recall.models import ReindexResult
+
+    settings = _make_settings(tmp_path, recall_enabled=True)
+
+    # Build a mock ReindexResult with indexed=0 (all notes unchanged)
+    mock_result = ReindexResult(indexed=0, deleted=0, skipped_unchanged=3, errors=[])
+
+    with (
+        patch("segretario.recall.state.ReindexStateStore") as MockStateStore,
+        patch("segretario.recall.indexer.VaultIndexer") as MockIndexer,
+        patch("segretario.recall.embedder.OllamaEmbedder"),
+        patch("segretario.recall.sqlite_vec_store.SqliteVecStore"),
+        patch("segretario.recall.chunker.H2OverlapChunker"),
+    ):
+        mock_state = MagicMock()
+        mock_state.should_skip.return_value = False  # not skipped — run the job
+        MockStateStore.return_value = mock_state
+
+        mock_indexer_instance = MagicMock()
+        mock_indexer_instance.reindex.return_value = mock_result
+        MockIndexer.return_value = mock_indexer_instance
+
+        result = _run_recall_reindex(settings)
+
+    # State must have been updated (set_last_run called exactly once)
+    mock_state.set_last_run.assert_called_once()
+    # Result string should not say error or skipped
+    assert "indexed=0" in result or "recall.reindex" in result
+    assert "error" not in result.lower() or "errors=0" in result

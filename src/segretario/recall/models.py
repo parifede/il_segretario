@@ -40,9 +40,21 @@ class WizardType(str, Enum):
 
 
 @dataclass
-class RecallHit:
-    """Singolo match restituito dal retriever."""
+class Chunk:
+    """Risultato dello splitting di una nota."""
     note_path: str
+    chunk_index: int
+    section_title: str | None
+    content: str
+    char_count: int
+
+
+@dataclass
+class RecallHit:
+    """Singolo match restituito dal retriever. Rappresenta un chunk di una nota."""
+    note_path: str
+    chunk_index: int
+    section_title: str | None
     score: float
     content_preview: str
 

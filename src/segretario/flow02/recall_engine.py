@@ -174,5 +174,6 @@ def _hits_to_text(hits: list) -> str:
     """Format RecallHit list as text block for LLM context."""
     parts = []
     for hit in hits:
-        parts.append(f"### {hit.note_path} (score: {hit.score:.3f})\n{hit.content_preview}")
+        section = f" [§ {hit.section_title}]" if hit.section_title else ""
+        parts.append(f"### {hit.note_path}{section} (chunk {hit.chunk_index}, score: {hit.score:.3f})\n{hit.content_preview}")
     return "\n\n".join(parts)

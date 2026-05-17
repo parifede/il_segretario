@@ -4,7 +4,7 @@ import hashlib
 import logging
 from pathlib import Path
 
-from segretario.recall.chunker import Chunker, WholeNoteChunker
+from segretario.recall.chunker import H2OverlapChunker
 from segretario.recall.embedder import OllamaEmbedder, EmbedderError
 from segretario.recall.models import ReindexResult
 from segretario.recall.vector_store import VectorStore
@@ -18,13 +18,13 @@ class VaultIndexer:
         vault_path: Path,
         store: VectorStore,
         embedder: OllamaEmbedder,
-        chunker: Chunker | None = None,
+        chunker: H2OverlapChunker | None = None,
         skip_paths: list[str] | None = None,
     ) -> None:
         self._vault_path = vault_path
         self._store = store
         self._embedder = embedder
-        self._chunker: Chunker = chunker or WholeNoteChunker()
+        self._chunker: H2OverlapChunker = chunker or H2OverlapChunker()
         self._skip_paths: list[str] = skip_paths or ["raw/elaborati"]
 
     def reindex(self, force: bool = False) -> ReindexResult:
@@ -48,26 +48,16 @@ class VaultIndexer:
 
             try:
                 content = note_path.read_text(encoding="utf-8", errors="replace")
-                content_hash = _sha256(content)
+                note_hash = _sha256(content)
 
                 if not force:
-                    stored_hash = self._store.get_indexed_hash(rel_path)
-                    if stored_hash == content_hash:
+                    stored_hash = self._store.get_indexed_note_hash(rel_path)
+                    if stored_hash == note_hash:
                         result.skipped_unchanged += 1
                         continue
 
-                # Embed and store
-                chunks = self._chunker.chunk(note_path, content)
-                if not chunks:
-                    continue
-                # WholeNoteChunker: always 1 chunk. Use first chunk's text.
-                embedding = self._embedder.embed(chunks[0].text)
-                self._store.upsert(rel_path, embedding, content_hash)
-                result.indexed += 1
+                self._index_note(rel_path, content, note_hash, result)
 
-            except EmbedderError as exc:
-                logger.warning("Failed to embed %s: %s", rel_path, exc)
-                result.errors.append(f"{rel_path}: {exc}")
             except Exception as exc:
                 logger.warning("Failed to process %s: %s", rel_path, exc)
                 result.errors.append(f"{rel_path}: {exc}")
@@ -76,13 +66,49 @@ class VaultIndexer:
         stale_paths = indexed_paths - scanned_paths
         for stale in stale_paths:
             try:
-                self._store.delete(stale)
+                self._store.delete_note(stale)
                 result.deleted += 1
             except Exception as exc:
                 logger.warning("Failed to delete stale entry %s: %s", stale, exc)
                 result.errors.append(f"{stale} (delete): {exc}")
 
         return result
+
+    def _index_note(self, rel_path: str, content: str, note_hash: str, result: ReindexResult) -> None:
+        """Index all chunks of a note. Clears old chunks first.
+
+        Counts the note as indexed if at least one chunk succeeds.
+        Individual chunk EmbedderErrors are logged but do NOT count as errors.
+        """
+        chunks = self._chunker.chunk(rel_path, content)
+        if not chunks:
+            return
+
+        # Clear old chunks for this note before inserting new ones
+        self._store.delete_note(rel_path)
+
+        any_indexed = False
+        for chunk in chunks:
+            content_hash = _sha256(chunk.content)
+            try:
+                embedding = self._embedder.embed(chunk.content)
+                self._store.upsert_chunk(
+                    note_path=rel_path,
+                    chunk_index=chunk.chunk_index,
+                    section_title=chunk.section_title,
+                    embedding=embedding,
+                    content_hash=content_hash,
+                    note_hash=note_hash,
+                )
+                any_indexed = True
+            except EmbedderError as exc:
+                logger.error(
+                    "Failed to embed chunk %d of %s: %s",
+                    chunk.chunk_index, rel_path, exc,
+                )
+
+        if any_indexed:
+            result.indexed += 1
 
     def update_note(self, note_path: Path) -> bool:
         """Re-index a single note. Called after ingest writes a file.
@@ -99,17 +125,14 @@ class VaultIndexer:
 
         try:
             content = note_path.read_text(encoding="utf-8", errors="replace")
-            content_hash = _sha256(content)
-            stored_hash = self._store.get_indexed_hash(rel_path)
-            if stored_hash == content_hash:
+            note_hash = _sha256(content)
+            stored_hash = self._store.get_indexed_note_hash(rel_path)
+            if stored_hash == note_hash:
                 return False  # unchanged
 
-            chunks = self._chunker.chunk(note_path, content)
-            if not chunks:
-                return False
-            embedding = self._embedder.embed(chunks[0].text)
-            self._store.upsert(rel_path, embedding, content_hash)
-            return True
+            result = ReindexResult()
+            self._index_note(rel_path, content, note_hash, result)
+            return result.indexed > 0
         except Exception as exc:
             logger.warning("update_note failed for %s: %s", note_path, exc)
             return False

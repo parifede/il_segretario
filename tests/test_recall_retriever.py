@@ -26,7 +26,7 @@ def _make_store_with_notes(vault_path: Path, n: int) -> SqliteVecStore:
         note_file.write_text(f"# Note {i}\nContent of note {i}.\n", encoding="utf-8")
         vec = [0.0] * 1024
         vec[i % 1024] = 1.0
-        store.upsert(f"note{i}.md", vec, f"hash{i}")
+        store.upsert_chunk(f"note{i}.md", 0, None, vec, f"chash{i}", f"nhash{i}")
     return store
 
 
@@ -59,7 +59,7 @@ def test_embedding_retriever_skips_missing_files(tmp_path: Path, caplog):
     store = SqliteVecStore(Path(":memory:"))
     # Insert a vector for a path that doesn't exist on disk
     vec = [1.0] + [0.0] * 1023
-    store.upsert("ghost.md", vec, "hashX")
+    store.upsert_chunk("ghost.md", 0, None, vec, "hashX", "nhashX")
 
     embedder = _make_embedder(return_vec=[1.0] + [0.0] * 1023)
 
@@ -70,3 +70,50 @@ def test_embedding_retriever_skips_missing_files(tmp_path: Path, caplog):
 
     assert len(hits) == 0
     assert any("ghost.md" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# test: RecallHit has chunk_index and section_title fields
+# ---------------------------------------------------------------------------
+
+def test_embedding_retriever_hit_has_chunk_fields(tmp_path: Path):
+    """RecallHit returned by search has chunk_index and section_title populated."""
+    store = SqliteVecStore(Path(":memory:"))
+    note_file = tmp_path / "sectioned.md"
+    note_file.write_text("## My Section\nSome content here.\n", encoding="utf-8")
+    vec = [1.0] + [0.0] * 1023
+    store.upsert_chunk("sectioned.md", 0, "My Section", vec, "ch", "nh")
+
+    embedder = _make_embedder(return_vec=[1.0] + [0.0] * 1023)
+    retriever = EmbeddingRetriever(vault_path=tmp_path, store=store, embedder=embedder)
+
+    hits = retriever.search("query", k=1)
+
+    assert len(hits) == 1
+    assert hits[0].chunk_index == 0
+    assert hits[0].section_title == "My Section"
+    assert hits[0].note_path == "sectioned.md"
+
+
+# ---------------------------------------------------------------------------
+# test: drift — chunk_index out of range → skip with warning
+# ---------------------------------------------------------------------------
+
+def test_embedding_retriever_skips_drifted_chunk_index(tmp_path: Path, caplog):
+    """If chunk_index in store is beyond current chunks, skip with WARNING."""
+    store = SqliteVecStore(Path(":memory:"))
+    # Note has short content → 1 chunk (index 0)
+    note_file = tmp_path / "short.md"
+    note_file.write_text("Short note.", encoding="utf-8")
+    vec = [1.0] + [0.0] * 1023
+    # Store chunk_index=5 (which won't exist after re-chunking)
+    store.upsert_chunk("short.md", 5, None, vec, "ch", "nh")
+
+    embedder = _make_embedder(return_vec=[1.0] + [0.0] * 1023)
+    retriever = EmbeddingRetriever(vault_path=tmp_path, store=store, embedder=embedder)
+
+    with caplog.at_level(logging.WARNING):
+        hits = retriever.search("query")
+
+    assert len(hits) == 0
+    assert any("drift" in record.message.lower() or "out of range" in record.message for record in caplog.records)
