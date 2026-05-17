@@ -36,7 +36,7 @@ def _invalidate_recall(vault_path: Path, written_path: Path) -> None:
         from segretario.recall.indexer import VaultIndexer
         from segretario.recall.embedder import OllamaEmbedder
         from segretario.recall.sqlite_vec_store import SqliteVecStore
-        from segretario.recall.chunker import WholeNoteChunker
+        from segretario.recall.chunker import H2OverlapChunker
 
         embedder = OllamaEmbedder(
             model=settings.recall.embedding_model,
@@ -50,7 +50,7 @@ def _invalidate_recall(vault_path: Path, written_path: Path) -> None:
             vault_path=vault_path,
             store=store,
             embedder=embedder,
-            chunker=WholeNoteChunker(),
+            chunker=H2OverlapChunker(),
             skip_paths=settings.recall.skip_paths,
         )
         indexer.update_note(written_path)
