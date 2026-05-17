@@ -65,6 +65,8 @@ def _make_preview(content: str) -> str:
     last_open = truncated.rfind("[[")
     last_close = truncated.rfind("]]")
     if last_open > last_close:
-        # We're inside an unclosed [[...]] — back up to before the [[
         truncated = truncated[:last_open]
+    elif truncated.endswith("[") and len(content) > _PREVIEW_MAX_CHARS and content[_PREVIEW_MAX_CHARS] == "[":
+        # Truncation split "[[" so only the first "[" is in the slice
+        truncated = truncated[:-1]
     return truncated.rstrip()
