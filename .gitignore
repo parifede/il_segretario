@@ -31,3 +31,6 @@ token.json
 
 # local test scratch
 .tmp/
+
+# git worktrees
+.worktrees/
