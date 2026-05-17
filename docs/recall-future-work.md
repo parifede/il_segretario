@@ -27,8 +27,25 @@ FTS5 come secondo retriever da fondere con `EmbeddingRetriever` via
 Reciprocal Rank Fusion. Da valutare se i match keyword puri mancano
 (es. nomi propri, codici, sigle) sull'esperienza reale.
 
-## TODO — Chunking per note lunghe
+## TODO — Ottimizzazioni chunking
 
-Il design attuale usa whole-note chunking (una nota = un vettore).
-Per note molto lunghe (>2000 token), la qualità dell'embedding può
-degradare. Valutare sliding-window chunking in futuro.
+1. **Salvare chunk content nel DB invece di ri-chunkare a search time.**
+   La V1 ri-legge e ri-chunka la nota a ogni query per generare il preview.
+   Salvare il content nel DB (campo TEXT in `indexed_chunks`) elimina I/O
+   e ri-computation, al costo di ~1.5 KB per chunk di storage extra.
+
+2. **Investigare le note con "empty response" da Ollama.**
+   Alcune note (`Austinitered.md`, `Fluffy_WAR_Bunny.md`, `fapyshop.com.md`)
+   ritornano embedding vuoto da Ollama. Ipotesi: contenuto non-testuale,
+   solo whitespace/unicode, o bug specifico Ollama. Indagare e correggere.
+
+3. **Chunk di URL/wikilink sovra-size (~100 nel vault attuale).**
+   Alcuni chunk superano i 1500 char per via di sezioni H2 con liste dense
+   di wikilink o URL lunghi. Il chunker li subsplit ma i chunk risultanti
+   possono avere struttura degradata. V2 potrebbe rilevare ed evitare split
+   dentro liste di link consecutive.
+
+4. **Chunking adattivo per code blocks e tabelle.**
+   Markdown con code fences (``` ```) o tabelle pesanti possono produrre chunk
+   in cui la struttura viene rotta a metà. V2 potrebbe rilevare ed evitare
+   split dentro code blocks o tabelle.

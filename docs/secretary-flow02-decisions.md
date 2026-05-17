@@ -68,18 +68,39 @@ Retry loop: `src/segretario/flow02/retry_loop.py`
 
 ## 9. Implementazione §8.2 (chiusa, 2026-05-17)
 
-Recall L3 semantico implementato in Task 2. Decisioni di design:
+Recall L3 semantico implementato in Task 2. Decisioni di design finali
+(dopo correzione chunking post-smoke-test, commit 516b44a):
 
 - Approccio: Embeddings puro + architettura aperta a FTS5 futuro
-- Modello: mxbai-embed-large (1024 dim) via Ollama locale
-- Chunking: nota intera (coerente con LLM Wiki di Karpathy)
-- Storage: sqlite-vec in database separato state/recall.sqlite
+- Modello: mxbai-embed-large (1024 dim, context window 512 token) via Ollama locale
+- **Chunking: H2 sections con overlap 200 char + fallback split per note senza H2.**
+  Target chunk ~1500 char (sicuro per 512-token context window su italiano).
+  Schema DB: chunk-based (`indexed_chunks` + `chunk_vectors` vec0 cosine).
+- Storage: sqlite-vec in database separato `state/recall.sqlite`
+- Metric: cosine distance (distance_metric=cosine su vec0); score esposto come
+  similarity = 1.0 - distance, range [0, 1], più alto = più simile.
 - Pre-filtering privacy: nessuno (self/ indicizzato, privacy = broker downstream)
 - Re-indexing: scheduled (skip < 15 min) + invalidazione su ingest
 - State machine a 5 stati per gestire i casi reali:
   SEMANTIC_READY, SEMANTIC_DISABLED_PROMPT (wizard A),
   SEMANTIC_DISABLED_DISMISSED, SEMANTIC_UNAVAILABLE_TRANSIENT (wizard B),
   SEMANTIC_DISABLED_OVERRIDE (per-turno)
+
+### Note storiche (patch post-smoke-test)
+
+Il design iniziale del 2026-05-17 prevedeva "whole-note chunking" basato su
+assunzione errata che mxbai-embed-large avesse context window 8192 token.
+Lo smoke test ha rivelato il limite reale 512 token (~1500 char italiano):
+solo 105/445 note si indicizzavano (23%). Corretti lo stesso giorno con
+strategia chunking H2 + overlap (indexed=444/445 nel run finale).
+
+Secondo bug smoke test: sqlite-vec ritornava distance grezza come score
+(valori > 1.0, ordering invertito). Corretti aggiungendo metric cosine esplicito
+e conversione similarity = 1.0 - distance.
+
+Terzo bug smoke test: il CLI `recall reindex` non aggiornava `ReindexStateStore`
+perché il codepath CLI era separato dal job scheduler. Lezione: verificare
+TUTTI i code path del feature, non solo quello più ovvio.
 
 ## 10. Nota di design — variante doppio broker (futura)
 
