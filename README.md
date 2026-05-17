@@ -62,6 +62,10 @@ uv run segretario task show <task_id>
 uv run segretario task run <task_id>
 uv run segretario approve <task_id>
 uv run segretario deny <task_id>
+uv run segretario recall status
+uv run segretario recall reindex [--force]
+uv run segretario recall search "query" [--k 5]
+uv run segretario recall reset-wizard
 ```
 
 ## Spec Phases

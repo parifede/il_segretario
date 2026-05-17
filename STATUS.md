@@ -2,7 +2,7 @@
 
 ## Flow 02: protocollo Zarsuit (fasi 1–4)
 
-**Aggiornato:** 2026-05-16
+**Aggiornato:** 2026-05-17
 
 ### Stato
 
@@ -12,7 +12,23 @@ Fasi 1–4 completate e committate su `master`.
 - Branch git: `backup/pre-flow02`
 - Filesystem: `E:\ZARSUIT_LOCAL_BACKUPS\il_segretario_20260516-165919`
 
-**Suite di test:** 327 pass, 2 fallimenti pre-esistenti (non Flow 02, da tracciare).
+**Suite di test:** 391 test disponibili. 38 nuovi test per Recall L3.
+
+## Recall semantico (Task 2 — implementato 2026-05-17)
+
+- **Modulo**: `src/segretario/recall/`
+- **Modello embedding**: `mxbai-embed-large` (1024 dim) via Ollama locale
+- **Storage**: `sqlite-vec` in `state/recall.sqlite` (DB separato dal taskboard)
+- **Chunking**: nota intera (whole-note), un vettore per nota
+- **Stato**: 5-state machine — SEMANTIC_READY, SEMANTIC_DISABLED_PROMPT, SEMANTIC_DISABLED_DISMISSED, SEMANTIC_UNAVAILABLE_TRANSIENT, SEMANTIC_DISABLED_OVERRIDE
+- **Privacy**: self/ indicizzato (privacy projection = ContextBroker downstream, §3.6)
+- **Re-indexing**: job schedulato (guardia 15 min) + invalidazione su ingest
+- **Comandi CLI**:
+  - `uv run segretario recall reindex [--force]`
+  - `uv run segretario recall status`
+  - `uv run segretario recall search "query" [--k 5]`
+  - `uv run segretario recall reset-wizard`
+- **Test**: 38 nuovi test, suite completa 391 test verdi
 
 ### Cosa è stato implementato
 
