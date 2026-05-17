@@ -106,6 +106,13 @@ class BackupSettings(BaseModel):
     state_path: Path | None = None
 
 
+class HTTPServerSettings(BaseModel):
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8722
+    auth_token_env: str = "IL_SEGRETARIO_HTTP_TOKEN"
+
+
 class RecallSettings(BaseModel):
     enabled: bool = False  # defensive default
     user_dismissed_wizard: bool = False
@@ -136,6 +143,7 @@ class Settings(BaseModel):
     zarsuit: ZarsuitSettings = Field(default_factory=ZarsuitSettings)
     backup: BackupSettings = Field(default_factory=BackupSettings)
     recall: RecallSettings = Field(default_factory=RecallSettings)
+    http_server: HTTPServerSettings = Field(default_factory=HTTPServerSettings)
     loaded_config_path: Path | None = None
 
     def to_safe_dict(self) -> dict[str, Any]:
