@@ -184,6 +184,15 @@ def _candidate_jobs(settings: Settings) -> list[SchedulerJob]:
                 reason="monthly vault backup with rolling retention",
             )
         )
+    if settings.recall.enabled:
+        jobs.append(
+            SchedulerJob(
+                command="recall.reindex",
+                action=PermissionKernel.OUTPUT_WRITE,
+                risk="low",
+                reason="periodic recall reindex to keep semantic search up to date",
+            )
+        )
     if settings.scheduler.maintenance_budget_minutes > 0:
         budget = settings.scheduler.maintenance_budget_minutes
         jobs.extend(
@@ -293,6 +302,7 @@ def _scheduler_commands() -> set[str]:
         "maintenance.cycle",
         "vault.backup_weekly",
         "vault.backup_monthly",
+        "recall.reindex",
     }
 
 
@@ -331,6 +341,8 @@ def _execute_command(command: str, settings: Settings) -> str:
         return _run_vault_backup(settings, kind="weekly")
     if command == "vault.backup_monthly":
         return _run_vault_backup(settings, kind="monthly")
+    if command == "recall.reindex":
+        return _run_recall_reindex(settings)
     raise ValueError(f"unsupported scheduler task: {command}")
 
 
@@ -518,6 +530,54 @@ def _run_vault_backup(settings: Settings, kind: str) -> str:
     if result.path is None:
         return f"backup.{kind}: {result.message}"
     return f"backup.{kind}: {result.path.name} ({result.size_bytes / (1024 * 1024):.1f} MB)"
+
+
+def _run_recall_reindex(settings: Settings) -> str:
+    if not settings.recall.enabled:
+        return "recall.reindex: skipped: recall disabled in config"
+
+    from segretario.recall.state import ReindexStateStore
+    from segretario.recall.indexer import VaultIndexer
+    from segretario.recall.embedder import OllamaEmbedder
+    from segretario.recall.sqlite_vec_store import SqliteVecStore
+    from segretario.recall.chunker import WholeNoteChunker
+    from datetime import datetime, timezone
+
+    state = ReindexStateStore(settings.recall.state_path)
+    now = datetime.now(timezone.utc)
+
+    if state.should_skip(now, settings.recall.reindex_threshold_minutes):
+        last = state.get_last_run()
+        return (
+            f"recall.reindex: skipped: last run at {last.isoformat()}, "
+            f"threshold {settings.recall.reindex_threshold_minutes} min"
+        )
+
+    try:
+        embedder = OllamaEmbedder(
+            model=settings.recall.embedding_model,
+            base_url=settings.recall.ollama_base_url,
+        )
+        store = SqliteVecStore(
+            db_path=settings.recall.db_path,
+            embedding_model=settings.recall.embedding_model,
+        )
+        vault_path = Path(settings.vault.path)
+        indexer = VaultIndexer(
+            vault_path=vault_path,
+            store=store,
+            embedder=embedder,
+            chunker=WholeNoteChunker(),
+            skip_paths=settings.recall.skip_paths,
+        )
+        result = indexer.reindex()
+        state.set_last_run(now, result.indexed_total, settings.recall.embedding_model)
+        return (
+            f"recall.reindex: indexed={result.indexed} deleted={result.deleted} "
+            f"skipped_unchanged={result.skipped_unchanged} errors={len(result.errors)}"
+        )
+    except Exception as exc:
+        return f"recall.reindex: error: {exc}"
 
 
 def _should_skip(relative: str, settings: Settings) -> bool:
