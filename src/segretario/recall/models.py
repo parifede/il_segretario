@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 
@@ -82,4 +81,5 @@ class ReindexResult:
 
     @property
     def indexed_total(self) -> int:
+        # alias for scheduler compatibility: records total notes indexed in state
         return self.indexed

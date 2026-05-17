@@ -111,8 +111,8 @@ class RecallSettings(BaseModel):
     user_dismissed_wizard: bool = False
     embedding_model: str = "mxbai-embed-large"
     ollama_base_url: str = "http://127.0.0.1:11434"
-    db_path: Path = Field(default_factory=lambda: Path("state/recall.sqlite"))
-    state_path: Path = Field(default_factory=lambda: Path("state/recall_last_run.json"))
+    db_path: Path = Field(default_factory=lambda: _root() / "state" / "recall.sqlite")
+    state_path: Path = Field(default_factory=lambda: _root() / "state" / "recall_last_run.json")
     default_k: int = 5
     reindex_threshold_minutes: int = 15
     skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
