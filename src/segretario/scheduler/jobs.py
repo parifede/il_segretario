@@ -167,6 +167,23 @@ def _candidate_jobs(settings: Settings) -> list[SchedulerJob]:
                 reason="prepare local daily digest output",
             )
         )
+    if settings.backup.enabled:
+        jobs.append(
+            SchedulerJob(
+                command="vault.backup_weekly",
+                action=PermissionKernel.OUTPUT_WRITE,
+                risk="low",
+                reason="weekly vault backup with rolling retention",
+            )
+        )
+        jobs.append(
+            SchedulerJob(
+                command="vault.backup_monthly",
+                action=PermissionKernel.OUTPUT_WRITE,
+                risk="low",
+                reason="monthly vault backup with rolling retention",
+            )
+        )
     if settings.scheduler.maintenance_budget_minutes > 0:
         budget = settings.scheduler.maintenance_budget_minutes
         jobs.extend(
@@ -274,6 +291,8 @@ def _scheduler_commands() -> set[str]:
         "stale_stub.review",
         "orphan_page.review",
         "maintenance.cycle",
+        "vault.backup_weekly",
+        "vault.backup_monthly",
     }
 
 
@@ -308,6 +327,10 @@ def _execute_command(command: str, settings: Settings) -> str:
         )
     if command == "maintenance.cycle":
         return _write_maintenance_cycle(settings)
+    if command == "vault.backup_weekly":
+        return _run_vault_backup(settings, kind="weekly")
+    if command == "vault.backup_monthly":
+        return _run_vault_backup(settings, kind="monthly")
     raise ValueError(f"unsupported scheduler task: {command}")
 
 
@@ -483,6 +506,16 @@ def _tail_lines(path: Path, *, limit: int) -> list[str]:
     if not path.exists():
         return []
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines()[-limit:] if line.strip()]
+
+
+def _run_vault_backup(settings: Settings, kind: str) -> str:
+    from segretario.backup.manager import BackupManager
+
+    manager = BackupManager(settings.backup, settings.vault.path)
+    result = manager.create(kind=kind)
+    if result.ok:
+        return f"backup.{kind}: {result.path.name} ({result.size_bytes / (1024 * 1024):.1f} MB)"
+    return f"backup.{kind} failed: {result.message}"
 
 
 def _should_skip(relative: str, settings: Settings) -> bool:

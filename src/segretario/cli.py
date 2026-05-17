@@ -432,6 +432,72 @@ def vault_check(
     _echo("\n".join(lines))
 
 
+@vault_app.command("backup")
+def vault_backup(
+    target: Path | None = typer.Option(None, "--target", help="Override target directory"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Crea un backup manuale del vault."""
+    from segretario.backup.manager import BackupKind, BackupManager
+
+    settings = load_settings(config_path=config)
+    backup_settings = settings.backup
+    if target:
+        backup_settings = backup_settings.model_copy(update={"target_dir": target})
+    manager = BackupManager(backup_settings, settings.vault.path)
+    result = manager.create(kind=BackupKind.MANUAL)
+    if result.ok:
+        _echo(f"Backup ok: {result.path}")
+        _echo(f"Size: {result.size_bytes / (1024 * 1024):.1f} MB")
+        _echo(f"SHA256: {result.sha256}")
+    else:
+        _echo(f"Backup failed: {result.message}")
+        raise typer.Exit(1)
+
+
+@vault_app.command("backup-list")
+def vault_backup_list(
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Lista i backup esistenti."""
+    from segretario.backup.manager import BackupManager
+
+    settings = load_settings(config_path=config)
+    manager = BackupManager(settings.backup, settings.vault.path)
+    backups = manager.list_backups()
+    if not backups:
+        _echo("Nessun backup trovato.")
+        return
+    for b in backups:
+        size_mb = b["size_bytes"] / (1024 * 1024)
+        _echo(f"{b['mtime']}  [{b['kind']:8}]  {b['name']}  ({size_mb:.1f} MB)")
+
+
+@vault_app.command("restore")
+def vault_restore(
+    backup_name: str = typer.Argument(..., help="Nome del file di backup"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Solo verifica integrita"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Ripristina un backup nel vault corrente (DISTRUTTIVO senza --dry-run)."""
+    from segretario.backup.manager import BackupManager
+
+    settings = load_settings(config_path=config)
+    manager = BackupManager(settings.backup, settings.vault.path)
+    if not dry_run:
+        _echo(f"ATTENZIONE: questa operazione SOVRASCRIVE il vault corrente: {settings.vault.path}")
+        confirm = typer.confirm("Procedere?")
+        if not confirm:
+            _echo("Restore annullato.")
+            raise typer.Exit(0)
+    result = manager.restore(backup_name, dry_run=dry_run)
+    if result.ok:
+        _echo(result.message)
+    else:
+        _echo(f"Restore failed: {result.message}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def search(
     query: str,

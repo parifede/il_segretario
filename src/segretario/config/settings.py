@@ -92,6 +92,17 @@ class ZarsuitSettings(BaseModel):
     ux_timeout_seconds: float = 3.0
 
 
+class BackupSettings(BaseModel):
+    enabled: bool = False
+    target_dir: Path = Field(
+        default_factory=lambda: Path(r"E:\ZARSUIT_LOCAL_BACKUPS")
+    )
+    weekly_retention: int = 4
+    monthly_retention: int = 12
+    skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
+    compression_level: int = 6
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -107,6 +118,7 @@ class Settings(BaseModel):
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     character: CharacterSettings = Field(default_factory=CharacterSettings)
     zarsuit: ZarsuitSettings = Field(default_factory=ZarsuitSettings)
+    backup: BackupSettings = Field(default_factory=BackupSettings)
     loaded_config_path: Path | None = None
 
     def to_safe_dict(self) -> dict[str, Any]:
