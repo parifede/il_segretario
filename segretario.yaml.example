@@ -56,3 +56,10 @@ backup:
   # target_dir: "E:\\ZARSUIT_LOCAL_BACKUPS"
   # weekly_threshold_days: 7
   # monthly_threshold_days: 30
+
+# recall:
+#   enabled: true
+#   user_dismissed_wizard: false
+#   embedding_model: "mxbai-embed-large"
+#   default_k: 5
+#   reindex_threshold_minutes: 15

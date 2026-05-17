@@ -106,6 +106,19 @@ class BackupSettings(BaseModel):
     state_path: Path | None = None
 
 
+class RecallSettings(BaseModel):
+    enabled: bool = False  # defensive default
+    user_dismissed_wizard: bool = False
+    embedding_model: str = "mxbai-embed-large"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    db_path: Path = Field(default_factory=lambda: Path("state/recall.sqlite"))
+    state_path: Path = Field(default_factory=lambda: Path("state/recall_last_run.json"))
+    default_k: int = 5
+    reindex_threshold_minutes: int = 15
+    skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
+    embedder_health_check_timeout_seconds: int = 5
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -122,6 +135,7 @@ class Settings(BaseModel):
     character: CharacterSettings = Field(default_factory=CharacterSettings)
     zarsuit: ZarsuitSettings = Field(default_factory=ZarsuitSettings)
     backup: BackupSettings = Field(default_factory=BackupSettings)
+    recall: RecallSettings = Field(default_factory=RecallSettings)
     loaded_config_path: Path | None = None
 
     def to_safe_dict(self) -> dict[str, Any]:
