@@ -57,7 +57,7 @@ class ContextBroker:
         recall_context: str | None = None
         recall_tokens = 0
         if intent == IntentType.MEMORY_LOOKUP:
-            recall_context = self._recall.recall(goal, max_tokens=_RECALL_L3_TOKENS)
+            recall_context = self._recall.recall_simple(goal, max_tokens=_RECALL_L3_TOKENS)
             recall_tokens = len(recall_context or "") // 4
 
         wm_tokens = wm.total_tokens()

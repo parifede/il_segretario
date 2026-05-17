@@ -5,10 +5,16 @@ from pathlib import Path
 
 import pytest
 
+from segretario.config.settings import RecallSettings
 from segretario.flow02.character_store import CharacterStore
 from segretario.flow02.models import WorkingMemoryTurn
 from segretario.flow02.recall_engine import RecallEngine
 from segretario.flow02.working_memory import WorkingMemory
+
+
+def _dismissed_settings() -> RecallSettings:
+    """RecallSettings with wizard dismissed → keyword search runs silently."""
+    return RecallSettings(enabled=False, user_dismissed_wizard=True)
 
 
 # ── CharacterStore ────────────────────────────────────────────────────────────
@@ -81,15 +87,15 @@ def test_working_memory_with_ceiling_doubled_allows_more_turns():
 # ── RecallEngine ──────────────────────────────────────────────────────────────
 
 def test_recall_engine_returns_none_for_missing_index(tmp_path):
-    engine = RecallEngine(tmp_path / "nonexistent.md")
-    assert engine.recall("riunione") is None
+    engine = RecallEngine(tmp_path / "nonexistent.md", recall_settings=_dismissed_settings())
+    assert engine.recall_simple("riunione") is None
 
 
 def test_recall_engine_returns_matching_lines(tmp_path):
     index = tmp_path / "index.md"
     index.write_text("riunione con Marco martedì\naltra nota senza match", encoding="utf-8")
-    engine = RecallEngine(index)
-    result = engine.recall("riunione Marco")
+    engine = RecallEngine(index, recall_settings=_dismissed_settings())
+    result = engine.recall_simple("riunione Marco")
     assert result is not None
     assert "riunione" in result
 
@@ -98,7 +104,7 @@ def test_recall_engine_respects_token_budget(tmp_path):
     index = tmp_path / "index.md"
     long_line = "riunione " + "x" * 2000
     index.write_text("\n".join([long_line] * 10), encoding="utf-8")
-    engine = RecallEngine(index)
-    result = engine.recall("riunione", max_tokens=100)
+    engine = RecallEngine(index, recall_settings=_dismissed_settings())
+    result = engine.recall_simple("riunione", max_tokens=100)
     assert result is not None
     assert len(result) <= 100 * 4 + 10  # margine minimo

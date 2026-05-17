@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from segretario.config.settings import RecallSettings
 from segretario.flow02.character_store import CharacterStore
 from segretario.flow02.context_broker import ContextBroker, _DEFAULT_L2_CEILING
 from segretario.flow02.models import (
@@ -17,6 +18,11 @@ from segretario.flow02.models import (
 )
 from segretario.flow02.recall_engine import RecallEngine
 from segretario.flow02.working_memory import WorkingMemory
+
+
+def _dismissed_settings() -> RecallSettings:
+    """RecallSettings with wizard dismissed → keyword search runs silently."""
+    return RecallSettings(enabled=False, user_dismissed_wizard=True)
 
 
 def _attestation() -> RiskAttestation:
@@ -46,7 +52,10 @@ def _broker(
     return ContextBroker(
         character_store=CharacterStore("Sei Zarsuit"),
         working_memory=wm,
-        recall_engine=RecallEngine(recall_index or Path("/nonexistent")),
+        recall_engine=RecallEngine(
+            recall_index or Path("/nonexistent"),
+            recall_settings=_dismissed_settings(),
+        ),
     )
 
 
