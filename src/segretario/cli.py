@@ -2909,3 +2909,50 @@ def recall_reset_wizard(
     _echo("Wizard reset: user_dismissed_wizard set to False.")
     _echo("Run 'segretario recall search' to trigger the activation wizard again.")
 
+
+# ---------------------------------------------------------------------------
+# HTTP server command
+# ---------------------------------------------------------------------------
+
+
+@app.command("http-server")
+def http_server_command(
+    host: str = typer.Option(None, "--host", help="Override bind host"),
+    port: int = typer.Option(None, "--port", help="Override port"),
+    reload: bool = typer.Option(False, "--reload", help="Enable dev auto-reload"),
+) -> None:
+    """Avvia il server HTTP del segretario (per ricevere richieste da zarsOS)."""
+    import os
+    import uvicorn
+    from segretario.http_server.app import create_app
+
+    settings = load_settings()
+
+    if not settings.http_server.enabled:
+        typer.echo(
+            "HTTP server is disabled in config (http_server.enabled=false). "
+            "Set http_server.enabled: true in segretario.yaml to enable.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    effective_host = host or settings.http_server.host
+    effective_port = port or settings.http_server.port
+
+    expected_token = os.getenv(settings.http_server.auth_token_env, "").strip()
+    if not expected_token:
+        typer.echo(
+            f"WARN: env var {settings.http_server.auth_token_env!r} is empty — "
+            "Bearer auth is DISABLED. Set it for production use.",
+            err=True,
+        )
+
+    app_instance = create_app(settings)
+    uvicorn.run(
+        app_instance,
+        host=effective_host,
+        port=effective_port,
+        reload=reload,
+        log_level="info",
+    )
+

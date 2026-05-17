@@ -20,6 +20,8 @@ dependencies = [
   "pillow>=12.2.0",
   "sqlite-vec>=0.1.0",
   "ollama>=0.4.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
 ]
 
 [project.scripts]
