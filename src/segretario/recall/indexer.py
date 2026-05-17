@@ -116,7 +116,7 @@ class VaultIndexer:
 
     def _scan_vault(self) -> list[Path]:
         """Return all .md files in vault, excluding skip_paths."""
-        all_md = list(self._vault_path.rglob("*.md"))
+        all_md = sorted(self._vault_path.rglob("*.md"))
         return [
             p for p in all_md
             if not self._is_skipped(p)
@@ -124,7 +124,7 @@ class VaultIndexer:
 
     def _is_skipped(self, path: Path) -> bool:
         rel = str(path.relative_to(self._vault_path)).replace("\\", "/")
-        return any(rel.startswith(skip) for skip in self._skip_paths)
+        return any(rel == skip or rel.startswith(skip + "/") for skip in self._skip_paths)
 
 
 def _sha256(content: str) -> str:
