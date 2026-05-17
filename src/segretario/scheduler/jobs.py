@@ -513,9 +513,11 @@ def _run_vault_backup(settings: Settings, kind: str) -> str:
 
     manager = BackupManager(settings.backup, settings.vault.path)
     result = manager.create(kind=kind)
-    if result.ok:
-        return f"backup.{kind}: {result.path.name} ({result.size_bytes / (1024 * 1024):.1f} MB)"
-    return f"backup.{kind} failed: {result.message}"
+    if not result.ok:
+        return f"backup.{kind} failed: {result.message}"
+    if result.path is None:
+        return f"backup.{kind}: {result.message}"
+    return f"backup.{kind}: {result.path.name} ({result.size_bytes / (1024 * 1024):.1f} MB)"
 
 
 def _should_skip(relative: str, settings: Settings) -> bool:

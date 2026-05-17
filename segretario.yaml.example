@@ -50,3 +50,9 @@ scheduler:
   inbox_watcher_enabled: false
   daily_digest_enabled: false
   maintenance_budget_minutes: 10
+
+backup:
+  enabled: false
+  # target_dir: "E:\\ZARSUIT_LOCAL_BACKUPS"
+  # weekly_threshold_days: 7
+  # monthly_threshold_days: 30

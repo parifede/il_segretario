@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,7 @@ def _settings(tmp_path: Path) -> BackupSettings:
         weekly_retention=2,
         monthly_retention=3,
         skip_paths=["raw/elaborati"],
+        state_path=tmp_path / "state" / "backup_last_run.json",
     )
 
 
@@ -82,12 +85,12 @@ def test_list_backups_returns_metadata(tmp_path):
 
 
 def test_retention_keeps_only_n_weekly(tmp_path):
-    import time
-
     vault = _make_vault(tmp_path)
     settings = _settings(tmp_path)  # weekly_retention=2
     manager = BackupManager(settings, vault)
     for _ in range(4):
+        # Reset state to simulate 8 days between runs so the guard never blocks
+        manager._state.set_last_run("weekly", datetime.now(timezone.utc) - timedelta(days=8))
         manager.create(kind=BackupKind.WEEKLY)
         time.sleep(1.1)
     archives = list(settings.target_dir.glob("il_segretario_vault_weekly_*.zip"))
@@ -95,8 +98,6 @@ def test_retention_keeps_only_n_weekly(tmp_path):
 
 
 def test_retention_does_not_touch_manual(tmp_path):
-    import time
-
     vault = _make_vault(tmp_path)
     settings = _settings(tmp_path)
     manager = BackupManager(settings, vault)
@@ -139,3 +140,109 @@ def test_restore_real_recreates_files(tmp_path):
     assert (vault / "knowledge" / "nota1.md").exists()
     assert (vault / "self" / "privato.md").exists()
     assert "àèìòù" in (vault / "knowledge" / "nota2.md").read_text(encoding="utf-8")
+
+
+def test_weekly_skips_if_last_run_too_recent(tmp_path):
+    vault = _make_vault(tmp_path)
+    manager = BackupManager(_settings(tmp_path), vault)
+
+    result1 = manager.create(kind=BackupKind.WEEKLY)
+    assert result1.ok
+    assert result1.path is not None
+
+    result2 = manager.create(kind=BackupKind.WEEKLY)
+    assert result2.ok
+    assert result2.path is None
+    assert "skipped" in result2.message.lower()
+
+
+def test_monthly_skips_if_last_run_too_recent(tmp_path):
+    vault = _make_vault(tmp_path)
+    manager = BackupManager(_settings(tmp_path), vault)
+
+    result1 = manager.create(kind=BackupKind.MONTHLY)
+    assert result1.ok
+    assert result1.path is not None
+
+    result2 = manager.create(kind=BackupKind.MONTHLY)
+    assert result2.ok
+    assert result2.path is None
+    assert "skipped" in result2.message.lower()
+
+
+def test_manual_ignores_last_run(tmp_path):
+    vault = _make_vault(tmp_path)
+    manager = BackupManager(_settings(tmp_path), vault)
+
+    for _ in range(3):
+        result = manager.create(kind=BackupKind.MANUAL)
+        assert result.ok
+        assert result.path is not None
+        time.sleep(1.1)
+
+
+def test_state_file_persisted_across_runs(tmp_path):
+    vault = _make_vault(tmp_path)
+    settings = _settings(tmp_path)
+
+    manager1 = BackupManager(settings, vault)
+    result1 = manager1.create(kind=BackupKind.WEEKLY)
+    assert result1.ok
+    assert result1.path is not None
+
+    manager2 = BackupManager(settings, vault)
+    result2 = manager2.create(kind=BackupKind.WEEKLY)
+    assert result2.path is None
+    assert "skipped" in result2.message.lower()
+
+
+def test_state_file_corrupted_logs_warning_and_proceeds(tmp_path, caplog):
+    import logging
+
+    vault = _make_vault(tmp_path)
+    settings = _settings(tmp_path)
+    manager = BackupManager(settings, vault)
+
+    state_path = manager._state._path
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("{ corrupted json", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        result = manager.create(kind=BackupKind.WEEKLY)
+
+    assert result.ok
+    assert result.path is not None
+    assert any("unreadable" in rec.message for rec in caplog.records)
+
+
+def test_threshold_boundary(tmp_path):
+    vault = _make_vault(tmp_path)
+    settings = _settings(tmp_path)
+    manager = BackupManager(settings, vault)
+
+    eight_days_ago = datetime.now(timezone.utc) - timedelta(days=8)
+    manager._state.set_last_run("weekly", eight_days_ago)
+
+    result = manager.create(kind=BackupKind.WEEKLY)
+    assert result.ok
+    assert result.path is not None  # 8 days > 7 — not skipped
+
+    six_days_ago = datetime.now(timezone.utc) - timedelta(days=6)
+    manager._state.set_last_run("weekly", six_days_ago)
+
+    result = manager.create(kind=BackupKind.WEEKLY)
+    assert result.path is None  # 6 < 7 — skipped
+
+
+def test_custom_threshold_from_settings(tmp_path):
+    vault = _make_vault(tmp_path)
+    settings = _settings(tmp_path).model_copy(update={
+        "weekly_threshold_days": 1,
+        "monthly_threshold_days": 2,
+    })
+    manager = BackupManager(settings, vault)
+
+    half_day_ago = datetime.now(timezone.utc) - timedelta(hours=12)
+    manager._state.set_last_run("weekly", half_day_ago)
+    result = manager.create(kind=BackupKind.WEEKLY)
+    assert result.path is None  # 0.5 days < 1 — skipped

@@ -5,7 +5,12 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from segretario.backup.state import BackupStateStore
 from segretario.config.settings import BackupSettings
+
+
+def _default_state_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "state" / "backup_last_run.json"
 
 
 class BackupKind:
@@ -37,8 +42,29 @@ class BackupManager:
     def __init__(self, settings: BackupSettings, vault_path: Path) -> None:
         self._settings = settings
         self._vault = vault_path
+        state_path = settings.state_path if settings.state_path is not None else _default_state_path()
+        self._state = BackupStateStore(state_path)
 
     def create(self, kind: str = BackupKind.MANUAL) -> BackupResult:
+        thresholds = {
+            BackupKind.WEEKLY: self._settings.weekly_threshold_days,
+            BackupKind.MONTHLY: self._settings.monthly_threshold_days,
+        }
+        if kind in thresholds:
+            now = datetime.now(timezone.utc)
+            if self._state.should_skip(kind, now, thresholds[kind]):
+                last = self._state.get_last_run(kind)
+                return BackupResult(
+                    ok=True,
+                    path=None,
+                    size_bytes=0,
+                    sha256=None,
+                    message=(
+                        f"skipped: last {kind} backup at {last.isoformat()}, "
+                        f"threshold {thresholds[kind]} days"
+                    ),
+                )
+
         if not self._vault.exists():
             return BackupResult(
                 ok=False, path=None, size_bytes=0, sha256=None,
@@ -88,10 +114,13 @@ class BackupManager:
             self._apply_retention(kind)
             self._log_to_vault(kind, archive_path, size, sha256_hex)
 
-            return BackupResult(
+            result = BackupResult(
                 ok=True, path=archive_path, size_bytes=size,
                 sha256=sha256_hex, message=f"backup created: {archive_name}",
             )
+            if kind in thresholds:
+                self._state.set_last_run(kind, datetime.now(timezone.utc))
+            return result
         except Exception as e:
             if tmp_path.exists():
                 try:

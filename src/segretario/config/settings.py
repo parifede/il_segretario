@@ -101,6 +101,9 @@ class BackupSettings(BaseModel):
     monthly_retention: int = 12
     skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
     compression_level: int = 6
+    weekly_threshold_days: int = 7
+    monthly_threshold_days: int = 30
+    state_path: Path | None = None
 
 
 class Settings(BaseModel):
