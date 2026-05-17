@@ -177,3 +177,14 @@ class SqliteVecStore:
         except Exception:
             logger.debug("SqliteVecStore.health_check failed", exc_info=True)
             return False
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._conn:
+            self._conn.close()
+
+    def __enter__(self) -> "SqliteVecStore":
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
