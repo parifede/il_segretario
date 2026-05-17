@@ -20,10 +20,10 @@ class OllamaEmbedder:
         base_url: str = "http://127.0.0.1:11434",
         timeout_seconds: int = 60,
     ) -> None:
-        self._model = model
-        self._base_url = base_url
-        self._timeout_seconds = timeout_seconds
-        self._client = ollama.Client(host=base_url, timeout=timeout_seconds)
+        self._model: str = model
+        self._base_url: str = base_url
+        self._timeout_seconds: int = timeout_seconds
+        self._client: ollama.Client = ollama.Client(host=base_url, timeout=timeout_seconds)
 
     def embed(self, text: str) -> list[float]:
         """Return embedding vector. Raises EmbedderError on any failure."""
@@ -35,6 +35,8 @@ class OllamaEmbedder:
         try:
             response = self._client.embed(model=self._model, input=text)
             # ollama Python client >= 0.4: response.embeddings is Sequence[Sequence[float]]
+            if not response.embeddings:
+                raise EmbedderError("Ollama returned empty embedding response")
             return list(response.embeddings[0])
         except ollama.ResponseError as exc:
             raise EmbedderError(f"Ollama model error: {exc}") from exc
@@ -47,7 +49,7 @@ class OllamaEmbedder:
         """Embed each text individually. Skips (with WARNING) on single-item failure.
 
         Idempotent: safe to retry. Returns only successful embeddings in order.
-        Items that fail are skipped silently (caller should re-check via indexer hash diff).
+        Items that fail are logged at WARNING level and skipped (caller recovers via indexer hash diff).
         """
         results: list[list[float]] = []
         for i, text in enumerate(texts):
