@@ -72,7 +72,24 @@ def project_private_context(text: str) -> PrivacyProjection:
     replace_pattern(r"\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b", "ID")
     replace_pattern(r"\b[A-Z]{2}\d{3}[A-Z]{2}\b", "VEHICLE")
     replace_pattern(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "EMAIL")
+
+    # ISO date-time strings like "2026-05-08 18:53" match the phone regex because
+    # the dash and space separators span 9+ digits. Protect them first.
+    _dt_saved: list[str] = []
+
+    def _save_dt(m: re.Match[str]) -> str:
+        idx = len(_dt_saved)
+        _dt_saved.append(m.group(0))
+        return f"\x00DT{idx}\x00"
+
+    projected = re.sub(
+        r"\b\d{4}[-/.]\d{2}[-/.]\d{2}(?:[ T]\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)?\b",
+        _save_dt,
+        projected,
+    )
     replace_pattern(r"(?:\+?\d{1,3}[\s.-]?)?(?:\d[\s.-]?){8,12}\d\b", "PHONE")
+    for i, dt in enumerate(_dt_saved):
+        projected = projected.replace(f"\x00DT{i}\x00", dt)
 
     projected = re.sub(
         r"\b(\d{1,2})\s+anni\b",

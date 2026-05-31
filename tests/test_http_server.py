@@ -1,11 +1,73 @@
-"""Tests for segretario.http_server — Task 3b-1 stub server."""
+"""Tests for segretario.http_server — Task 3b-1/3b-2."""
 from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from segretario.config.settings import HTTPServerSettings, Settings
+from segretario.audit.hash_chain import AuditLog
+from segretario.config.settings import HTTPServerSettings, RecallSettings, Settings
+from segretario.connectors.ollama_client import LocalModelUnavailable
+from segretario.flow02.recall_engine import RecallEngine
 from segretario.http_server.app import create_app
+
+
+# ---------------------------------------------------------------------------
+# Fake helpers for injection
+# ---------------------------------------------------------------------------
+
+class _FakeRecallEngine:
+    """Minimal stand-in for RecallEngine with controllable output."""
+
+    def __init__(self, result: str | None, *, raises: bool = False) -> None:
+        self._result = result
+        self._raises = raises
+
+    def recall_simple(self, query: str, max_tokens: int = 4000) -> str | None:  # noqa: ARG002
+        if self._raises:
+            raise RuntimeError("ollama down")
+        return self._result
+
+
+class _FakeAuditLog:
+    """In-memory audit log for test assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def append_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.events.append((event_type, payload))
+        return {}
+
+
+class _FakeLLMClient:
+    """Minimal stand-in for OllamaClient with controllable output.
+
+    Default behaviour: passthrough — extracts the prose embedded in the
+    synthesis prompt and returns it unchanged so PII-projection tests
+    remain valid without a real Ollama server.
+    """
+
+    def __init__(self, *, raises: bool = False, response: str | None = None) -> None:
+        self._raises = raises
+        self._response = response
+
+    def generate(self, prompt: str, system: str | None = None) -> str:  # noqa: ARG002
+        if self._raises:
+            raise LocalModelUnavailable("test: model unavailable")
+        if self._response is not None:
+            return self._response
+        # Passthrough: extract the prose injected between "Testo:\n" and "\n\nRiassumi"
+        marker = "Testo:\n"
+        end_marker = "\n\nRiassumi"
+        if marker in prompt:
+            start = prompt.index(marker) + len(marker)
+            end = prompt.find(end_marker, start)
+            if end > start:
+                return prompt[start:end]
+        return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -13,17 +75,75 @@ from segretario.http_server.app import create_app
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def app_with_auth(monkeypatch):
-    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
-    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
-    return create_app(settings)
+def fake_audit() -> _FakeAuditLog:
+    return _FakeAuditLog()
 
 
 @pytest.fixture
-def app_no_auth(monkeypatch):
+def app_with_auth(monkeypatch, fake_audit):
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    return create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=fake_audit,
+        llm_client=_FakeLLMClient(),
+    )
+
+
+@pytest.fixture
+def app_no_auth(monkeypatch, fake_audit):
     monkeypatch.delenv("IL_SEGRETARIO_HTTP_TOKEN", raising=False)
     settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
-    return create_app(settings)
+    return create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=fake_audit,
+        llm_client=_FakeLLMClient(),
+    )
+
+
+def _authed_client(app, fake_recall: _FakeRecallEngine | None = None, fake_audit: _FakeAuditLog | None = None, *, monkeypatch=None) -> TestClient:
+    return TestClient(app)
+
+
+AUTH_HEADER = {"Authorization": "Bearer test-token-123"}
+
+MINIMAL_ENVELOPE = {"secretary_context_request": {"request_id": "req-001"}}
+FULL_ENVELOPE = {
+    "secretary_context_request": {
+        "request_id": "req-001",
+        "user_request_full": "cosa so sul progetto alpha?",
+        "intent": "memory_lookup",
+        "policy_classification": "private",
+        "requested_information": ["progetto alpha"],
+        "forbidden_context": [],
+        "output_policy": "summarized",
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Helper factories that inject specific recall behavior
+# ---------------------------------------------------------------------------
+
+def _make_app_with_recall(
+    monkeypatch,
+    recall_result: str | None,
+    *,
+    raises: bool = False,
+    llm_client: _FakeLLMClient | None = None,
+) -> tuple[TestClient, _FakeAuditLog]:
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(recall_result, raises=raises),
+        audit_log=audit,
+        llm_client=llm_client if llm_client is not None else _FakeLLMClient(),
+    )
+    return TestClient(app), audit
 
 
 # ---------------------------------------------------------------------------
@@ -44,39 +164,212 @@ def test_health_no_auth_no_token_env(app_no_auth):
 
 
 # ---------------------------------------------------------------------------
-# Context happy path
+# Context: contract invariants (§3)
 # ---------------------------------------------------------------------------
 
-def test_context_happy_path(app_with_auth):
+def test_context_happy_path_contract_invariants(app_with_auth):
+    """Valid request → 200 with all required contract fields."""
     client = TestClient(app_with_auth)
+    r = client.post("/context", headers=AUTH_HEADER, json=MINIMAL_ENVELOPE)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+
+    # request_id must be echoed
+    assert resp["request_id"] == "req-001"
+    # status must be one of the valid values
+    assert resp["status"] in {"allowed", "partial", "denied", "requires_clarification", "handled_by_secretary"}
+    # cloud_safe must be True when allowed or partial
+    if resp["status"] in ("allowed", "partial"):
+        assert resp["cloud_safe"] is True
+    # raw_included must be absent or False
+    assert resp.get("raw_included") is False
+    # context_payload must have summary (str) and constraints (list of str)
+    payload = resp["context_payload"]
+    assert isinstance(payload["summary"], str)
+    assert isinstance(payload["constraints"], list)
+    assert all(isinstance(c, str) for c in payload["constraints"])
+    # requires_output_return must be a bool
+    assert isinstance(resp["requires_output_return"], bool)
+
+
+def test_context_request_id_echoed(monkeypatch):
+    client, _ = _make_app_with_recall(monkeypatch, None)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
-        json={"secretary_context_request": {"request_id": "req-001", "extra": "data"}},
+        headers=AUTH_HEADER,
+        json={"secretary_context_request": {"request_id": "my-unique-id-42"}},
     )
     assert r.status_code == 200
-    body = r.json()
-    resp = body["secretary_context_response"]
-    assert resp["request_id"] == "req-001"
-    assert resp["status"] == "allowed"
-    assert resp["privacy_level"] == "sanitized"
-    assert resp["cloud_safe"] is True
-    assert resp["requires_output_return"] is False
-    assert resp["raw_included"] is False
-    assert resp["context_payload"]["summary"] == "Segretario locale di prova: projection disponibile."
-    assert resp["context_payload"]["constraints"] == ["projection only", "no raw private data"]
-    assert resp["usage_constraints"] == ["projection only"]
+    assert r.json()["secretary_context_response"]["request_id"] == "my-unique-id-42"
+
+
+def test_context_no_raw_included(monkeypatch):
+    client, _ = _make_app_with_recall(monkeypatch, "some vault content with private data")
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+    assert resp.get("raw_included") is False
+
+
+def test_context_pii_projected_from_summary(monkeypatch):
+    """Privacy projection must strip PII (names, employers) from recall content."""
+    raw = "Mario Rossi ha 35 anni e lavora come senior developer presso Acme S.p.A."
+    client, _ = _make_app_with_recall(monkeypatch, raw)
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    summary = r.json()["secretary_context_response"]["context_payload"]["summary"]
+    assert "Mario Rossi" not in summary
+    assert "Acme S.p.A." not in summary
+
+
+def test_context_summary_has_no_recall_headers(monkeypatch):
+    """Recall chunk headers (### path, chunk N, score X) must not appear in summary."""
+    raw = (
+        "### knowledge\\info.md [§ Backup] (chunk 3, score: 0.850)\n"
+        "Informazione utile sul backup.\n"
+        "\n"
+        "### self\\profile.md [§ 2026-05-08 18:53 | handled_by: local] (chunk 7, score: 0.720)\n"
+        "Altra informazione rilevante."
+    )
+    client, _ = _make_app_with_recall(monkeypatch, raw)
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    summary = r.json()["secretary_context_response"]["context_payload"]["summary"]
+    # No structural plumbing or Markdown heading markers
+    assert "###" not in summary
+    assert not any(line.startswith("#") for line in summary.splitlines())
+    assert "knowledge\\" not in summary
+    assert "self\\" not in summary
+    assert "chunk" not in summary
+    assert "score:" not in summary.lower()
+    # Content must still be present
+    assert "backup" in summary.lower() or "informazione" in summary.lower()
 
 
 # ---------------------------------------------------------------------------
-# Task happy path
+# Context: status mapping
+# ---------------------------------------------------------------------------
+
+def test_context_allowed_when_recall_returns_content(monkeypatch):
+    client, _ = _make_app_with_recall(monkeypatch, "informazioni generiche sul progetto")
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+    assert resp["status"] == "allowed"
+    assert resp["cloud_safe"] is True
+
+
+def test_context_partial_when_recall_unavailable(monkeypatch):
+    """recall_simple raises → sanitized partial, no crash."""
+    client, _ = _make_app_with_recall(monkeypatch, None, raises=True)
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+    assert resp["status"] == "partial"
+    assert resp["cloud_safe"] is True
+    assert resp.get("raw_included") is False
+
+
+def test_context_partial_for_memory_lookup_no_content(monkeypatch):
+    """memory_lookup intent with recall returning None → partial."""
+    client, _ = _make_app_with_recall(monkeypatch, None)
+    envelope = {
+        "secretary_context_request": {
+            "request_id": "req-ml",
+            "user_request_full": "chi era il mio dentista?",
+            "intent": "memory_lookup",
+        }
+    }
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    assert r.json()["secretary_context_response"]["status"] == "partial"
+
+
+def test_context_denied_when_forbidden_context_matched(monkeypatch):
+    client, _ = _make_app_with_recall(monkeypatch, "some content")
+    envelope = {
+        "secretary_context_request": {
+            "request_id": "req-deny",
+            "user_request_full": "dimmi tutto sul conto bancario segreto",
+            "intent": "memory_lookup",
+            "forbidden_context": ["conto bancario segreto"],
+        }
+    }
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    assert r.json()["secretary_context_response"]["status"] == "denied"
+    # denied → cloud_safe should still be False (not in allowed/partial)
+    assert r.json()["secretary_context_response"]["cloud_safe"] is False
+
+
+# ---------------------------------------------------------------------------
+# Context: audit event written
+# ---------------------------------------------------------------------------
+
+def test_context_audit_event_written(monkeypatch):
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine("vault content"),
+        audit_log=audit,
+        llm_client=_FakeLLMClient(),
+    )
+    client = TestClient(app)
+    client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert len(audit.events) >= 1
+    event_types = [et for et, _ in audit.events]
+    assert "context_request_handled" in event_types
+
+
+def test_context_audit_event_written_on_denied(monkeypatch):
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=audit,
+        llm_client=_FakeLLMClient(),
+    )
+    client = TestClient(app)
+    envelope = {
+        "secretary_context_request": {
+            "request_id": "req-deny",
+            "user_request_full": "parola_vietata",
+            "forbidden_context": ["parola_vietata"],
+        }
+    }
+    client.post("/context", headers=AUTH_HEADER, json=envelope)
+    event_types = [et for et, _ in audit.events]
+    assert "context_request_denied" in event_types
+
+
+# ---------------------------------------------------------------------------
+# Context: error isolation — no leak on internal failure
+# ---------------------------------------------------------------------------
+
+def test_context_recall_error_no_stack_trace_leak(monkeypatch):
+    """Internal recall error → sanitized partial, no exception text in response."""
+    client, _ = _make_app_with_recall(monkeypatch, None, raises=True)
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    body_text = r.text
+    assert "traceback" not in body_text.lower()
+    assert "runtimeerror" not in body_text.lower()
+    assert "ollama down" not in body_text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Task happy path (stub — unchanged)
 # ---------------------------------------------------------------------------
 
 def test_task_happy_path(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/task",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_task_request": {"request": {"request_id": "task-001"}, "extra": "ok"}},
     )
     assert r.status_code == 200
@@ -146,7 +439,7 @@ def test_extra_root_field_rejected(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={
             "secretary_context_request": {"request_id": "x"},
             "extra_field": "not allowed",
@@ -159,7 +452,7 @@ def test_empty_envelope_rejected(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {}},
     )
     assert r.status_code == 422
@@ -169,7 +462,7 @@ def test_raw_private_key_rejected(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {"request_id": "x", "raw_private_data": "leak"}},
     )
     assert r.status_code == 422
@@ -179,7 +472,7 @@ def test_raw_private_key_nested_rejected(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {"request_id": "x", "nested": {"raw-private": "leak"}}},
     )
     assert r.status_code == 422
@@ -190,7 +483,7 @@ def test_raw_private_key_camel_rejected(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {"request_id": "x", "rawPrivateKey": "leak"}},
     )
     assert r.status_code == 422
@@ -201,7 +494,7 @@ def test_invalid_request_id_pattern_returns_400(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {"request_id": "invalid with spaces"}},
     )
     assert r.status_code == 400
@@ -212,7 +505,7 @@ def test_invalid_request_id_too_long_returns_400(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/context",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={"secretary_context_request": {"request_id": "a" * 161}},
     )
     assert r.status_code == 400
@@ -238,7 +531,7 @@ def test_unknown_path_is_404(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post(
         "/unknown",
-        headers={"Authorization": "Bearer test-token-123"},
+        headers=AUTH_HEADER,
         json={},
     )
     assert r.status_code == 404
@@ -260,5 +553,136 @@ def test_localhost_string_accepted():
     settings = Settings(
         http_server=HTTPServerSettings(enabled=True, host="localhost")
     )
-    app = create_app(settings)
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=_FakeAuditLog(),
+        llm_client=_FakeLLMClient(),
+    )
     assert app is not None
+
+
+# ---------------------------------------------------------------------------
+# Context: Gemma synthesis integration
+# ---------------------------------------------------------------------------
+
+def test_context_gemma_down_returns_partial(monkeypatch):
+    """LocalModelUnavailable from LLM → status=partial, cloud_safe=True, no crash."""
+    client, _ = _make_app_with_recall(
+        monkeypatch,
+        "informazioni sensibili nel vault",
+        llm_client=_FakeLLMClient(raises=True),
+    )
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+    assert resp["status"] == "partial"
+    assert resp["cloud_safe"] is True
+    assert resp.get("raw_included") is False
+    # No internal error details must leak
+    assert "LocalModelUnavailable" not in r.text
+    assert "traceback" not in r.text.lower()
+
+
+def test_context_output_guard_strips_oauth_from_synthesis(monkeypatch):
+    """output_guard must redact OAuth tokens that appear in LLM synthesis output."""
+    oauth_synthesis = "ya29.SomeOAuthToken il progetto procede regolarmente."
+    client, _ = _make_app_with_recall(
+        monkeypatch,
+        "qualsiasi contenuto vault",
+        llm_client=_FakeLLMClient(response=oauth_synthesis),
+    )
+    r = client.post("/context", headers=AUTH_HEADER, json=FULL_ENVELOPE)
+    assert r.status_code == 200
+    summary = r.json()["secretary_context_response"]["context_payload"]["summary"]
+    assert "ya29." not in summary
+    assert "[REDACTED_OAUTH_TOKEN]" in summary or "progetto" in summary
+
+
+# ---------------------------------------------------------------------------
+# Context: forbidden_context chunk-level filter (Task 3b-2)
+# ---------------------------------------------------------------------------
+
+_FC_RAW_MIXED = (
+    "### knowledge/agenda.md (chunk 1, score: 0.900)\n"
+    "Il documento tratta l'agenda settimanale.\n\n"
+    "### knowledge/project.md (chunk 2, score: 0.800)\n"
+    "Il progetto procede bene.\n"
+)
+
+_FC_RAW_ALL_FORBIDDEN = (
+    "### knowledge/agenda.md (chunk 1, score: 0.900)\n"
+    "Agenda settimanale del team.\n\n"
+    "### knowledge/meeting.md (chunk 2, score: 0.800)\n"
+    "Riunione di agenda domani.\n"
+)
+
+_FC_ENVELOPE_BASE = {
+    "secretary_context_request": {
+        "request_id": "req-fc",
+        "user_request_full": "dimmi del progetto",
+        "intent": "memory_lookup",
+    }
+}
+
+
+def test_forbidden_context_chunk_filtered_does_not_reach_synthesis(monkeypatch):
+    """Chunks containing a forbidden term are removed before synthesis sees them."""
+    client, _ = _make_app_with_recall(monkeypatch, _FC_RAW_MIXED)
+    envelope = {**_FC_ENVELOPE_BASE, "secretary_context_request": {
+        **_FC_ENVELOPE_BASE["secretary_context_request"],
+        "forbidden_context": ["agenda"],
+    }}
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    summary = r.json()["secretary_context_response"]["context_payload"]["summary"]
+    assert "agenda" not in summary.lower()
+
+
+def test_forbidden_context_filter_is_case_insensitive(monkeypatch):
+    """forbidden_context filter matches regardless of case in the chunk text."""
+    raw = (
+        "### knowledge/agenda.md (chunk 1, score: 0.900)\n"
+        "Il documento tratta l'AGENDA settimanale.\n\n"
+        "### knowledge/project.md (chunk 2, score: 0.800)\n"
+        "Il progetto procede bene.\n"
+    )
+    client, _ = _make_app_with_recall(monkeypatch, raw)
+    envelope = {**_FC_ENVELOPE_BASE, "secretary_context_request": {
+        **_FC_ENVELOPE_BASE["secretary_context_request"],
+        "forbidden_context": ["agenda"],
+    }}
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    summary = r.json()["secretary_context_response"]["context_payload"]["summary"]
+    assert "agenda" not in summary.lower()
+
+
+def test_forbidden_context_absent_no_filtering(monkeypatch):
+    """No forbidden_context field → no filtering, content passes through as allowed."""
+    client, _ = _make_app_with_recall(monkeypatch, _FC_RAW_MIXED)
+    envelope = {"secretary_context_request": {"request_id": "req-fc-absent", "user_request_full": "dimmi tutto", "intent": "memory_lookup"}}
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    assert r.json()["secretary_context_response"]["status"] == "allowed"
+
+
+def test_forbidden_context_empty_list_no_filtering(monkeypatch):
+    """Empty forbidden_context list → no filtering, content passes through as allowed."""
+    client, _ = _make_app_with_recall(monkeypatch, _FC_RAW_MIXED)
+    envelope = {"secretary_context_request": {"request_id": "req-fc-empty", "user_request_full": "dimmi tutto", "intent": "memory_lookup", "forbidden_context": []}}
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    assert r.json()["secretary_context_response"]["status"] == "allowed"
+
+
+def test_forbidden_context_all_filtered_returns_partial_no_crash(monkeypatch):
+    """All chunks filtered out → status=partial, cloud_safe=True, no forbidden content in summary."""
+    client, _ = _make_app_with_recall(monkeypatch, _FC_RAW_ALL_FORBIDDEN)
+    envelope = {"secretary_context_request": {"request_id": "req-fc-all", "user_request_full": "cosa ho in programma?", "intent": "memory_lookup", "forbidden_context": ["agenda"]}}
+    r = client.post("/context", headers=AUTH_HEADER, json=envelope)
+    assert r.status_code == 200
+    resp = r.json()["secretary_context_response"]
+    assert resp["status"] == "partial"
+    assert resp["cloud_safe"] is True
+    assert "agenda" not in resp["context_payload"]["summary"].lower()

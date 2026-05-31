@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"E:\\\\ZARSUIT_LOCAL_BACKUPS\" | Sort-Object LastWriteTime -Descending | Select-Object -First 10 Name, LastWriteTime, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "PowerShell(cd \"e:\\\\il_segretario\\\\.worktrees\\\\task3b1-http-server\"; $env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token-abc123\"; $proc = Start-Process -FilePath \".\\\\.venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m uvicorn segretario.http_server.app:create_app --factory --host 127.0.0.1 --port 8722\" -PassThru -NoNewWindow; Start-Sleep -Seconds 3; Write-Host \"PID: $\\($proc.Id\\)\")",
+      "PowerShell(Stop-Process -Id 19424 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 7636 -Force -ErrorAction SilentlyContinue)",
+      "Skill(gsd-explore)",
+      "Skill(gsd-explore:*)",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-token\"; Start-Process -FilePath \"uv\" -ArgumentList \"run segretario http-server --host 127.0.0.1 --port 8722\" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 4; Write-Output \"Server started\")",
+      "PowerShell(Invoke-RestMethod -Uri \"http://127.0.0.1:8722/health\")",
+      "PowerShell(uv run python smoke3_test.py 2>&1)",
+      "PowerShell(Stop-Process -Id 26652 -Force -Confirm:$false 2>&1)",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; Set-Location e:\\\\il_segretario; Start-Process -FilePath \"uv\" -ArgumentList \"run\",\"segretario\",\"http-server\",\"--port\",\"8722\" -PassThru; Start-Sleep -Seconds 4; Invoke-WebRequest -Uri http://127.0.0.1:8722/health -UseBasicParsing | Select-Object -ExpandProperty Content)",
+      "PowerShell(Stop-Process -Id 3288 -Force -Confirm:$false 2>$null)",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; Set-Location e:\\\\il_segretario; Start-Process -FilePath \"uv\" -ArgumentList \"run\",\"segretario\",\"http-server\",\"--port\",\"8722\" -PassThru; Start-Sleep -Seconds 4; \\(Invoke-WebRequest -Uri http://127.0.0.1:8722/health -UseBasicParsing\\).Content)",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; Set-Location e:\\\\il_segretario; $job = Start-Job -ScriptBlock { Set-Location e:\\\\il_segretario; $env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; uv run segretario http-server --port 8722 }; Start-Sleep -Seconds 6; netstat -ano | Select-String \":8722\" | Select-Object -First 2)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://127.0.0.1:8722/health\" -Method Get)",
+      "PowerShell(Receive-Job -Id 1 2>&1)",
+      "PowerShell(Get-Job)",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; Set-Location e:\\\\il_segretario; uv run segretario http-server --port 8722 2>&1 | Select-Object -First 30)",
+      "PowerShell($body = '{\"model\":\"gemma4:e4b\",\"prompt\":\"Ciao, una frase sola.\",\"stream\":false}'; $resp = Invoke-RestMethod -Uri \"http://127.0.0.1:11434/api/generate\" -Method Post -Body $body -ContentType \"application/json\" -TimeoutSec 60; $resp.response)",
+      "PowerShell(netstat -ano | Select-String \":8722 \" | ForEach-Object { $parts = $_ -split '\\\\s+'; $procId = $parts[-1]; if \\($procId -match '^\\\\d+$'\\) { Stop-Process -Id \\([int]$procId\\) -Force -Confirm:$false -ErrorAction SilentlyContinue } }; Start-Sleep -Milliseconds 500; netstat -ano | Select-String \":8722\")",
+      "PowerShell($env:IL_SEGRETARIO_HTTP_TOKEN = \"smoke-test-token\"; Set-Location e:\\\\il_segretario; $proc = Start-Process -FilePath \"cmd.exe\" -ArgumentList \"/c\",\"set IL_SEGRETARIO_HTTP_TOKEN=smoke-test-token && uv run segretario http-server --port 8722\" -WindowStyle Hidden -PassThru; Start-Sleep -Seconds 5; netstat -ano | Select-String \":8722 \")",
+      "PowerShell($body = '{\"secretary_context_request\":{\"request_id\":\"tone-001b\",\"user_request_full\":\"Di cosa abbiamo parlato di recente e a che punto siamo?\",\"intent\":\"memory_lookup\"}}'; $headers = @{\"Authorization\"=\"Bearer smoke-test-token\";\"Content-Type\"=\"application/json\"}; $raw = Invoke-WebRequest -Uri \"http://127.0.0.1:8722/context\" -Method Post -Body $body -Headers $headers -TimeoutSec 150; [System.Text.Encoding]::UTF8.GetString\\($raw.RawContentBytes\\) | Out-String)"
+    ]
+  }
+}

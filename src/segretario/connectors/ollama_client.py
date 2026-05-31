@@ -14,11 +14,13 @@ class OllamaClient:
         model: str,
         base_url: str,
         timeout_seconds: float = 120,
+        think: bool | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.think = think
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
     def generate(self, prompt: str, system: str | None = None) -> str:
@@ -29,6 +31,8 @@ class OllamaClient:
         }
         if system:
             payload["system"] = system
+        if self.think is not None:
+            payload["think"] = self.think
 
         try:
             response = self._client.post(f"{self.base_url}/api/generate", json=payload)

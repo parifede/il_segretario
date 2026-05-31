@@ -3,6 +3,7 @@ from segretario.policies.privacy import (
     project_private_context,
     web_query_decision,
 )
+from segretario.http_server.context_handler import _strip_recall_headers
 
 
 def test_knowledge_is_local_by_default_without_public_frontmatter():
@@ -95,3 +96,110 @@ def test_project_private_context_tokenizes_sensitive_identifiers_and_generalizes
     assert "technical role band" in projected.text
     assert "ORG_TOKEN_A" in projected.text
     assert "broad health category" in projected.text
+
+
+# ---------------------------------------------------------------------------
+# PHONE false-positive fix: ISO datetime protection
+# ---------------------------------------------------------------------------
+
+def test_iso_datetime_not_replaced_as_phone():
+    """ISO date-time like '2026-05-08 18:53' must not become PHONE_TOKEN."""
+    text = "Sessione del 2026-05-08 18:53 gestita localmente."
+    projected = project_private_context(text)
+    assert "PHONE_TOKEN" not in projected.text
+    assert "2026-05-08" in projected.text
+    assert "18:53" in projected.text
+
+
+def test_iso_date_only_not_replaced_as_phone():
+    """Plain ISO date '2026-05-08' must not become PHONE_TOKEN."""
+    text = "Backup eseguito il 2026-05-08."
+    projected = project_private_context(text)
+    assert "PHONE_TOKEN" not in projected.text
+    assert "2026-05-08" in projected.text
+
+
+def test_standalone_time_not_replaced_as_phone():
+    """Standalone time '18:23' must not become PHONE_TOKEN."""
+    text = "L'appuntamento è alle 18:23 di domani."
+    projected = project_private_context(text)
+    assert "PHONE_TOKEN" not in projected.text
+    assert "18:23" in projected.text
+
+
+def test_real_phone_still_tokenized_after_datetime_fix():
+    """Real phone numbers must still be replaced after the ISO date protection."""
+    text = "Chiamami al +39 333 1234567 domani."
+    projected = project_private_context(text)
+    assert "PHONE_TOKEN_A" in projected.text
+    assert "+39 333 1234567" not in projected.text
+
+
+def test_phone_and_datetime_in_same_text():
+    """Datetime is kept, phone is replaced, in the same text."""
+    text = "Il 2026-05-08 18:53 ho chiamato il +39 06 12345678."
+    projected = project_private_context(text)
+    assert "2026-05-08" in projected.text
+    assert "PHONE_TOKEN_A" in projected.text
+    assert "+39 06 12345678" not in projected.text
+
+
+# ---------------------------------------------------------------------------
+# Header strip: _strip_recall_headers
+# ---------------------------------------------------------------------------
+
+_SAMPLE_RECALL = (
+    "### knowledge\\zarsuit-capabilities.md [§ Backup] (chunk 10, score: 0.786)\n"
+    "Backup locali in E:\\ZARSUIT_LOCAL_BACKUPS.\n"
+    "\n"
+    "### self\\zarsuit_profile\\conversation-log.md "
+    "[§ 2026-05-08 18:53 | handled_by: local] (chunk 24, score: 0.744)\n"
+    "del vault con 345 file accessibili a livello locale."
+)
+
+
+def test_strip_recall_headers_removes_hash_lines():
+    stripped = _strip_recall_headers(_SAMPLE_RECALL)
+    assert "###" not in stripped
+    assert not any(line.startswith("#") for line in stripped.splitlines())
+
+
+def test_strip_recall_headers_removes_vault_paths():
+    stripped = _strip_recall_headers(_SAMPLE_RECALL)
+    assert "knowledge\\" not in stripped
+    assert "self\\" not in stripped
+
+
+def test_strip_recall_headers_removes_chunk_and_score():
+    stripped = _strip_recall_headers(_SAMPLE_RECALL)
+    assert "chunk" not in stripped
+    assert "score:" not in stripped.lower()
+
+
+def test_strip_recall_headers_keeps_content():
+    stripped = _strip_recall_headers(_SAMPLE_RECALL)
+    assert "Backup locali" in stripped
+    assert "del vault con 345 file" in stripped
+
+
+def test_strip_recall_headers_strips_inline_markdown_headings():
+    """Markdown headings inside content (### Opzione A) must also be stripped."""
+    text = (
+        "### knowledge\\info.md [§ Section] (chunk 0, score: 0.9)\n"
+        "### Opzione A: testo A\n"
+        "Prosa normale.\n"
+        "## Opzione B: testo B\n"
+        "Altra prosa."
+    )
+    stripped = _strip_recall_headers(text)
+    assert "###" not in stripped
+    assert "##" not in stripped
+    # Content text must survive
+    assert "testo A" in stripped
+    assert "Prosa normale" in stripped
+    assert "Altra prosa" in stripped
+
+
+def test_strip_recall_headers_no_change_on_plain_text():
+    plain = "Questo è testo normale senza intestazioni recall."
+    assert _strip_recall_headers(plain) == plain
