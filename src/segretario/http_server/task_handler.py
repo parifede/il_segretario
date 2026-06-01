@@ -71,11 +71,12 @@ _DECISION_ORDER: dict[str, int] = {
 _FAILED_CONTENT_TEMPLATE = "Non è stato possibile completare il task. Riprova più tardi."
 _REFUSED_CONTENT_TEMPLATE = "Mi dispiace, non posso eseguire questo tipo di operazione."
 
-# System framing: voice only — no privacy disclaimers (guard handles that).
+# System framing: voice only — no privacy disclaimers (guard handles them downstream).
 _TASK_SYSTEM_FRAMING = (
-    "Prepara la risposta per il task utente richiesto. "
-    "Usa SOLO il contesto fornito; se assente o insufficiente, dillo. "
-    "Non inventare mai dati del Vault (note, progetti, date, contatti)."
+    "Rispondi al task in italiano naturale e conciso. "
+    "Il materiale di riferimento, se presente, va usato per informare la risposta — "
+    "non va narrato né ripetuto. "
+    "Per i dati non disponibili scrivi '[da definire]', non inventare nomi, date o dettagli."
 )
 
 
@@ -148,19 +149,21 @@ def _generate_content(
     system = character_store.identity() + "\n" + _TASK_SYSTEM_FRAMING
     task_desc = f"{domain}/{action_type}" + (f" ({action_name})" if action_name else "")
 
-    context_block = f"Contesto dal Vault:\n{grounding}\n\n" if grounding else ""
+    context_block = (
+        f"Materiale di riferimento dal Vault:\n{grounding}\n\n"
+    ) if grounding else ""
 
     if state == "requires_confirmation":
         prompt = (
             f"{context_block}"
-            f"Task richiesto: {task_desc}\n"
-            "Prepara una bozza e spiega che serve la conferma dell'utente prima di procedere."
+            f"Task: {task_desc}\n\n"
+            "Prepara una bozza concisa e indica che serve la conferma dell'utente prima di procedere."
         )
     else:
         prompt = (
             f"{context_block}"
-            f"Task richiesto: {task_desc}\n"
-            "Prepara la risposta o il risultato del task."
+            f"Task: {task_desc}\n\n"
+            "Prepara la risposta."
         )
     return llm_client.generate(prompt, system=system)
 

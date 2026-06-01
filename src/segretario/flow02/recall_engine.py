@@ -54,6 +54,7 @@ class RecallEngine:
                     vault_path=vault_path,
                     store=self._store,
                     embedder=self._embedder,
+                    max_chunk_chars=self._settings.embedder_max_chunk_chars,
                 )
             except Exception as exc:
                 logger.warning(

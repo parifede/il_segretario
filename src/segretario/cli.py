@@ -2702,6 +2702,7 @@ def recall_reindex(
         _echo("(dry-run not yet implemented in VaultIndexer)")
         return
 
+    from segretario.recall.chunker import H2OverlapChunker
     from segretario.recall.embedder import OllamaEmbedder
     from segretario.recall.indexer import VaultIndexer
     from segretario.recall.sqlite_vec_store import SqliteVecStore
@@ -2728,10 +2729,12 @@ def recall_reindex(
             db_path=recall.db_path,
             embedding_model=recall.embedding_model,
         )
+        chunker = H2OverlapChunker(max_chunk_chars=recall.embedder_max_chunk_chars)
         indexer = VaultIndexer(
             vault_path=settings.vault.path,
             store=store,
             embedder=embedder,
+            chunker=chunker,
             skip_paths=recall.skip_paths,
         )
         result = indexer.reindex(force=force)

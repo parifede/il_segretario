@@ -562,11 +562,12 @@ def _run_recall_reindex(settings: Settings) -> str:
             embedding_model=settings.recall.embedding_model,
         )
         vault_path = Path(settings.vault.path)
+        chunker = H2OverlapChunker(max_chunk_chars=settings.recall.embedder_max_chunk_chars)
         indexer = VaultIndexer(
             vault_path=vault_path,
             store=store,
             embedder=embedder,
-            chunker=H2OverlapChunker(),
+            chunker=chunker,
             skip_paths=settings.recall.skip_paths,
         )
         result = indexer.reindex()

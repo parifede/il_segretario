@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from segretario.recall.chunker import H2OverlapChunker
+from segretario.recall.chunker import H2OverlapChunker, CHUNK_MAX_CHARS_DEFAULT
 from segretario.recall.embedder import OllamaEmbedder, EmbedderError
 from segretario.recall.models import RecallHit
 from segretario.recall.vector_store import VectorStore, VectorHit
@@ -17,12 +17,16 @@ class EmbeddingRetriever:
     """
 
     def __init__(
-        self, vault_path: Path, store: VectorStore, embedder: OllamaEmbedder
+        self,
+        vault_path: Path,
+        store: VectorStore,
+        embedder: OllamaEmbedder,
+        max_chunk_chars: int = CHUNK_MAX_CHARS_DEFAULT,
     ) -> None:
         self._vault_path = vault_path
         self._store = store
         self._embedder = embedder
-        self._chunker = H2OverlapChunker()
+        self._chunker = H2OverlapChunker(max_chunk_chars=max_chunk_chars)
 
     def search(self, query: str, k: int = 5) -> list[RecallHit]:
         """Search for notes matching the query semantically.

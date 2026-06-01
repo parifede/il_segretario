@@ -1,6 +1,11 @@
 from __future__ import annotations
 import pytest
-from segretario.recall.chunker import H2OverlapChunker, CHUNK_TARGET_SIZE, CHUNK_OVERLAP_SIZE
+from segretario.recall.chunker import (
+    H2OverlapChunker,
+    CHUNK_TARGET_SIZE,
+    CHUNK_OVERLAP_SIZE,
+    CHUNK_MAX_CHARS_DEFAULT,
+)
 
 
 def test_chunker_empty_note():
@@ -73,9 +78,11 @@ def test_chunker_exact_target_size():
     assert len(chunks) == 1
 
 
-def test_chunker_one_over_target_size_produces_two_chunks():
-    chunker = H2OverlapChunker()
-    content = "C" * (CHUNK_TARGET_SIZE + 1)
+def test_chunker_one_over_cap_produces_two_chunks():
+    """Content just over max_chunk_chars splits into two chunks."""
+    cap = 500  # explicit small cap; must be > CHUNK_OVERLAP_SIZE (200)
+    chunker = H2OverlapChunker(max_chunk_chars=cap)
+    content = "C" * (cap + 1)
     chunks = chunker.chunk("test.md", content)
     assert len(chunks) == 2
 
@@ -101,3 +108,28 @@ def test_chunker_h2_chunk_indices_are_sequential_across_sections():
     content = "## A\n" + "X" * 3000 + "\n\n## B\n" + "Y" * 3000
     chunks = chunker.chunk("test.md", content)
     assert [c.chunk_index for c in chunks] == list(range(len(chunks)))
+
+
+def test_chunker_all_chunks_within_max_chunk_chars():
+    """Long multi-section document produces no chunk exceeding max_chunk_chars."""
+    cap = 800  # well above CHUNK_OVERLAP_SIZE, easy to reason about
+    chunker = H2OverlapChunker(max_chunk_chars=cap)
+    content = (
+        "## Sezione Alpha\n" + "A" * 2000
+        + "\n\n## Sezione Beta\n" + "B" * 3000
+        + "\n\n## Sezione Gamma\n" + "G" * 1500
+    )
+    chunks = chunker.chunk("test.md", content)
+    assert len(chunks) > 0
+    assert all(len(c.content) <= cap for c in chunks)
+
+
+def test_chunker_default_cap_is_chunk_max_chars_default():
+    """Default max_chunk_chars matches CHUNK_MAX_CHARS_DEFAULT constant."""
+    chunker = H2OverlapChunker()
+    assert chunker.max_chunk_chars == CHUNK_MAX_CHARS_DEFAULT
+
+
+def test_chunker_chunk_target_size_fits_within_default_cap():
+    """CHUNK_TARGET_SIZE (backward-compat constant) is below the default cap."""
+    assert CHUNK_TARGET_SIZE < CHUNK_MAX_CHARS_DEFAULT

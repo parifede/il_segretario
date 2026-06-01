@@ -102,8 +102,8 @@ class VaultIndexer:
                 )
                 any_indexed = True
             except EmbedderError as exc:
-                logger.error(
-                    "Failed to embed chunk %d of %s: %s",
+                logger.warning(
+                    "Failed to embed chunk %d of %s: %s — skipping chunk",
                     chunk.chunk_index, rel_path, exc,
                 )
 

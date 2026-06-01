@@ -46,11 +46,12 @@ def _invalidate_recall(vault_path: Path, written_path: Path) -> None:
             db_path=settings.recall.db_path,
             embedding_model=settings.recall.embedding_model,
         )
+        chunker = H2OverlapChunker(max_chunk_chars=settings.recall.embedder_max_chunk_chars)
         indexer = VaultIndexer(
             vault_path=vault_path,
             store=store,
             embedder=embedder,
-            chunker=H2OverlapChunker(),
+            chunker=chunker,
             skip_paths=settings.recall.skip_paths,
         )
         indexer.update_note(written_path)
