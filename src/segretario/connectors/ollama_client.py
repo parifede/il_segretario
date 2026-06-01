@@ -15,12 +15,14 @@ class OllamaClient:
         base_url: str,
         timeout_seconds: float = 120,
         think: bool | None = None,
+        keep_alive: int = -1,
         client: httpx.Client | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.think = think
+        self.keep_alive = keep_alive
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
     def generate(self, prompt: str, system: str | None = None) -> str:
@@ -28,6 +30,7 @@ class OllamaClient:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
         }
         if system:
             payload["system"] = system

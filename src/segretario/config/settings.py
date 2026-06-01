@@ -26,6 +26,7 @@ class LLMSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     temperature: float = 0.2
     timeout_seconds: int = 120
+    sync_model_keep_alive: int = -1  # -1 = always resident; coordinate with async model-swap in Phase 5
 
 
 class CLISettings(BaseModel):
