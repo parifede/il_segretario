@@ -58,6 +58,7 @@ def create_app(
         think=False,
         keep_alive=settings.llm.sync_model_keep_alive,
         num_predict=settings.llm.sync_model_num_predict,
+        num_ctx=settings.llm.sync_model_num_ctx,
     )
     _character = CharacterStore.from_config(settings.character.identity)
 

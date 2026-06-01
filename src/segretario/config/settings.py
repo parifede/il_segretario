@@ -28,6 +28,7 @@ class LLMSettings(BaseModel):
     timeout_seconds: int = 120
     sync_model_keep_alive: int = -1  # -1 = always resident; coordinate with async model-swap in Phase 5
     sync_model_num_predict: int | None = None  # None = Ollama default; set ~300-400 to cap latency
+    sync_model_num_ctx: int = 8192  # KV cache window; 8192 keeps model fully in GPU VRAM
 
 
 class CLISettings(BaseModel):

@@ -104,3 +104,34 @@ def test_ollama_client_omits_num_predict_by_default():
     ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434", client=client)
     ollama.generate("prompt")
     assert "num_predict" not in captured["payload"]
+
+
+def test_ollama_client_includes_num_ctx_in_options_when_set():
+    """num_ctx is sent inside payload['options']['num_ctx'] when configured."""
+    import json as _json
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = _json.loads(request.read())
+        return httpx.Response(200, json={"response": "ok", "done": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434",
+                          num_ctx=8192, client=client)
+    ollama.generate("prompt")
+    assert captured["payload"].get("options", {}).get("num_ctx") == 8192
+
+
+def test_ollama_client_omits_options_num_ctx_by_default():
+    """options.num_ctx is absent from payload when num_ctx not configured."""
+    import json as _json
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = _json.loads(request.read())
+        return httpx.Response(200, json={"response": "ok", "done": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434", client=client)
+    ollama.generate("prompt")
+    assert "num_ctx" not in captured["payload"].get("options", {})
