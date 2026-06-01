@@ -16,6 +16,7 @@ class OllamaClient:
         timeout_seconds: float = 120,
         think: bool | None = None,
         keep_alive: int = -1,
+        num_predict: int | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.model = model
@@ -23,6 +24,7 @@ class OllamaClient:
         self.timeout_seconds = timeout_seconds
         self.think = think
         self.keep_alive = keep_alive
+        self.num_predict = num_predict
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
     def generate(self, prompt: str, system: str | None = None) -> str:
@@ -36,6 +38,8 @@ class OllamaClient:
             payload["system"] = system
         if self.think is not None:
             payload["think"] = self.think
+        if self.num_predict is not None:
+            payload["num_predict"] = self.num_predict
 
         try:
             response = self._client.post(f"{self.base_url}/api/generate", json=payload)

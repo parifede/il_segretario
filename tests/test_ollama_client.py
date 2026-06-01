@@ -73,3 +73,34 @@ def test_ollama_client_keep_alive_default_is_minus_one():
     ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434", client=client)
     ollama.generate("prompt")
     assert captured["payload"]["keep_alive"] == -1
+
+
+def test_ollama_client_includes_num_predict_when_set():
+    """num_predict is sent in the payload when configured."""
+    import json as _json
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = _json.loads(request.read())
+        return httpx.Response(200, json={"response": "ok", "done": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434",
+                          num_predict=350, client=client)
+    ollama.generate("prompt")
+    assert captured["payload"]["num_predict"] == 350
+
+
+def test_ollama_client_omits_num_predict_by_default():
+    """num_predict is absent from payload when not configured (avoids Ollama default override)."""
+    import json as _json
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = _json.loads(request.read())
+        return httpx.Response(200, json={"response": "ok", "done": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ollama = OllamaClient(model="m", base_url="http://127.0.0.1:11434", client=client)
+    ollama.generate("prompt")
+    assert "num_predict" not in captured["payload"]

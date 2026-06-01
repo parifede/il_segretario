@@ -57,6 +57,7 @@ def create_app(
         timeout_seconds=settings.llm.timeout_seconds,
         think=False,
         keep_alive=settings.llm.sync_model_keep_alive,
+        num_predict=settings.llm.sync_model_num_predict,
     )
     _character = CharacterStore.from_config(settings.character.identity)
 
