@@ -15,7 +15,8 @@ from segretario.flow02.recall_engine import RecallEngine
 from segretario.http_server.auth import make_bearer_dependency
 from segretario.http_server.context_handler import build_context_projection
 from segretario.http_server.models import ContextRequestBody, TaskRequestBody
-from segretario.http_server.stub_responses import build_task_response
+from segretario.flow02.character_store import CharacterStore
+from segretario.http_server.task_handler import AuditUnavailableError, build_task_response_real
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,9 @@ def create_app(
         base_url=settings.llm.base_url,
         timeout_seconds=settings.llm.timeout_seconds,
         think=False,
+        keep_alive=settings.llm.sync_model_keep_alive,
     )
+    _character = CharacterStore.from_config(settings.character.identity)
 
     app = FastAPI(
         title="il_segretario HTTP",
@@ -112,8 +115,16 @@ def create_app(
         _auth: None = Depends(auth_dep),
     ) -> JSONResponse:
         try:
-            return JSONResponse(build_task_response(body.model_dump()))
+            result = build_task_response_real(
+                body.secretary_task_request,
+                _audit,
+                _llm,
+                _character,
+            )
+            return JSONResponse(result)
         except ValueError:
             return _err("invalid_request", status.HTTP_400_BAD_REQUEST)
+        except AuditUnavailableError:
+            return _err("audit_unavailable", status.HTTP_503_SERVICE_UNAVAILABLE)
 
     return app
