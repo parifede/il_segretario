@@ -127,7 +127,7 @@ class RecallSettings(BaseModel):
     reindex_threshold_minutes: int = 15
     skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
     embedder_health_check_timeout_seconds: int = 5
-    embedder_max_chunk_chars: int = 1600  # hard cap per embedder token window (mxbai: 512 tok ≈ 1600 chars)
+    embedder_max_chunk_chars: int = 1000  # hard cap per embedder token window (mxbai: 512 tok; 1000 chars ≈ 250 tok)
 
 
 class Settings(BaseModel):

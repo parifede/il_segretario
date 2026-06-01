@@ -4,9 +4,9 @@ import re
 from segretario.recall.models import Chunk
 
 
-CHUNK_TARGET_SIZE = 1500   # kept for backward-compat with existing tests
+CHUNK_TARGET_SIZE = 900    # kept for backward-compat with existing tests
 CHUNK_OVERLAP_SIZE = 200
-CHUNK_MAX_CHARS_DEFAULT = 1600  # hard cap ≈ 450/512 mxbai-embed-large tokens (conservative)
+CHUNK_MAX_CHARS_DEFAULT = 1000  # hard cap — ~250 tokens, safe margin under mxbai 512-tok limit
 
 H2_PATTERN = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 

@@ -24,8 +24,9 @@ def test_chunker_short_note_no_h2():
 
 
 def test_chunker_long_note_no_h2_splits_with_overlap():
+    # 2200 chars with cap=1000, overlap=200 → exactly 3 chunks
     chunker = H2OverlapChunker()
-    content = "A" * 3500
+    content = "A" * 2200
     chunks = chunker.chunk("test.md", content)
     assert len(chunks) == 3
     assert all(c.section_title is None for c in chunks)
@@ -133,3 +134,8 @@ def test_chunker_default_cap_is_chunk_max_chars_default():
 def test_chunker_chunk_target_size_fits_within_default_cap():
     """CHUNK_TARGET_SIZE (backward-compat constant) is below the default cap."""
     assert CHUNK_TARGET_SIZE < CHUNK_MAX_CHARS_DEFAULT
+
+
+def test_chunk_max_chars_default_is_1000():
+    """CHUNK_MAX_CHARS_DEFAULT must be 1000 for safe mxbai headroom."""
+    assert CHUNK_MAX_CHARS_DEFAULT == 1000
