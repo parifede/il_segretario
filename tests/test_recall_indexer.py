@@ -292,8 +292,8 @@ def test_indexer_adaptive_split_zero_chunks_lost(tmp_path: Path):
     from segretario.recall.embedder import EmbedderContextTooLongError
     from segretario.recall.chunker import H2OverlapChunker
 
-    # Chunker cap=800 so each chunk is ≤800 chars, but mock threshold=400 → all chunks fail first try
-    content = "# Dense Block\n" + "W" * 2000
+    # 1800 chars with cap=800, overlap=200 → 3 chunks of 800/800/600 chars, all > mock threshold 400
+    content = "W" * 1800
     (tmp_path / "dense.md").write_text(content, encoding="utf-8")
 
     embedder = MagicMock(spec=OllamaEmbedder)
