@@ -11,6 +11,10 @@ class EmbedderError(Exception):
     """Raised when embedding fails. Message should be suitable for wizard_context["failure_reason"]."""
 
 
+class EmbedderContextTooLongError(EmbedderError):
+    """Raised when text exceeds the embedder's context window (Ollama 400 response)."""
+
+
 class OllamaEmbedder:
     """Ollama embedding client using mxbai-embed-large (1024-dim by default)."""
 
@@ -39,6 +43,8 @@ class OllamaEmbedder:
                 raise EmbedderError("Ollama returned empty embedding response")
             return list(response.embeddings[0])
         except ollama.ResponseError as exc:
+            if exc.status_code == 400:
+                raise EmbedderContextTooLongError(f"Ollama context exceeded (400): {exc}") from exc
             raise EmbedderError(f"Ollama model error: {exc}") from exc
         except Exception as exc:
             raise EmbedderError(

@@ -64,3 +64,32 @@ def test_embedder_health_check_false_on_error():
     with patch("ollama.Client.embed", side_effect=ConnectionError("refused")):
         result = embedder.health_check()
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# test: context-length error detection
+# ---------------------------------------------------------------------------
+
+def test_embedder_raises_context_too_long_on_400():
+    """Ollama 400 ResponseError → EmbedderContextTooLongError raised."""
+    import ollama
+    from segretario.recall.embedder import EmbedderContextTooLongError
+
+    embedder = OllamaEmbedder()
+    error = ollama.ResponseError("context length exceeded", 400)
+    with patch.object(embedder._client, "embed", side_effect=error):
+        with pytest.raises(EmbedderContextTooLongError):
+            embedder.embed("some text")
+
+
+def test_embedder_non_400_raises_plain_embedder_error():
+    """Non-400 Ollama error → EmbedderError but NOT EmbedderContextTooLongError."""
+    import ollama
+    from segretario.recall.embedder import EmbedderContextTooLongError
+
+    embedder = OllamaEmbedder()
+    error = ollama.ResponseError("model not found", 404)
+    with patch.object(embedder._client, "embed", side_effect=error):
+        with pytest.raises(EmbedderError) as exc_info:
+            embedder.embed("some text")
+    assert not isinstance(exc_info.value, EmbedderContextTooLongError)
