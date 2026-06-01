@@ -10,6 +10,7 @@ from segretario.connectors.ollama_client import LocalModelUnavailable, OllamaCli
 from segretario.flow02.models import IntentType
 from segretario.flow02.recall_engine import RecallEngine
 from segretario.http_server.models import validate_safe_request_id
+from segretario.policies.grounding_guard import fence_grounding, guard_grounding
 from segretario.policies.output_guard import sanitize_user_output
 from segretario.policies.privacy import project_private_context
 
@@ -196,6 +197,9 @@ def _project(
     if output_policy:
         base_constraints.append(f"output_policy:{output_policy}")
 
+    guard_injection_detected = False
+    guard_segments_stripped = 0
+
     if recall_error:
         status = "partial"
         summary = sanitize_user_output(
@@ -216,41 +220,56 @@ def _project(
             status = "allowed"
             summary = sanitize_user_output("Nessun contesto specifico richiesto dal vault.")
     else:
-        # 4-step pipeline: strip → synthesize → PII tokenize → sanitize
+        # 4-step pipeline: strip → guard → synthesize → PII tokenize → sanitize
         prose = _strip_recall_headers(recall_content)
 
-        # Step 3: local LLM synthesis (optional — skipped when llm_client is None)
-        synthesis_text = prose
-        llm_failed = False
-        if llm_client is not None:
-            try:
-                synthesis_text = _synthesize_with_gemma(llm_client, prose)
-            except LocalModelUnavailable as exc:
-                logger.warning("Gemma synthesis unavailable: %s", exc)
-                llm_failed = True
+        # Injection guard: strip suspicious paragraphs before synthesis
+        guard_result = guard_grounding(prose)
+        guard_injection_detected = guard_result.injection_detected
+        guard_segments_stripped = guard_result.segments_stripped
 
-        if llm_failed:
+        if guard_result.clean_text is None:
             status = "partial"
             summary = sanitize_user_output(
-                "Contesto disponibile ma sintesi temporaneamente non raggiungibile."
+                "Contesto non disponibile entro i vincoli richiesti."
             )
         else:
-            # Step 4: PII tokenization on synthesis output
-            try:
-                projection = project_private_context(synthesis_text)
-                # Step 5: mandatory output_guard pass
-                summary = sanitize_user_output(projection.text)
-            except Exception as exc:
-                logger.warning("privacy projection failed: %s", exc)
+            prose = guard_result.clean_text
+
+            # Step 3: local LLM synthesis (optional — skipped when llm_client is None)
+            synthesis_text = prose
+            llm_failed = False
+            if llm_client is not None:
+                try:
+                    synthesis_text = _synthesize_with_gemma(llm_client, fence_grounding(prose))
+                except LocalModelUnavailable as exc:
+                    logger.warning("Gemma synthesis unavailable: %s", exc)
+                    llm_failed = True
+
+            if llm_failed:
+                status = "partial"
                 summary = sanitize_user_output(
-                    "Contesto disponibile ma proiezione non applicabile."
+                    "Contesto disponibile ma sintesi temporaneamente non raggiungibile."
                 )
-            status = "allowed"
+            else:
+                # Step 4: PII tokenization on synthesis output
+                try:
+                    projection = project_private_context(synthesis_text)
+                    # Step 5: mandatory output_guard pass
+                    summary = sanitize_user_output(projection.text)
+                except Exception as exc:
+                    logger.warning("privacy projection failed: %s", exc)
+                    summary = sanitize_user_output(
+                        "Contesto disponibile ma proiezione non applicabile."
+                    )
+                status = "allowed"
 
     _write_audit(audit_log, "context_request_handled", {
         "request_id": request_id,
         "intent": intent_raw,
         "status": status,
+        "injection_detected": guard_injection_detected,
+        "segments_stripped": guard_segments_stripped,
     })
 
     return _build_response(
