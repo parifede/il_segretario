@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 import re
@@ -8,6 +8,78 @@ import re
 from segretario.policies.privacy import knowledge_export_decision
 from segretario.vault.frontmatter import parse_frontmatter
 from segretario.vault.paths import classify_vault_path
+
+
+# ---------------------------------------------------------------------------
+# Q4 guard — mirrors Node outputGuard.js pattern list exactly
+# (source of truth: docs/secretary_bridge_contract.md §Q4)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GuardResult:
+    fired: bool
+    redactions: list[str] = field(default_factory=list)
+
+
+# Unambiguous identifiers: never appear in legitimate user output.
+# Matched as bare tokens (word-boundary) — no JSON quoting required.
+_SCHEMA_KEYS_UNAMBIGUOUS: tuple[str, ...] = (
+    "secretary_task_request",
+    "secretary_context_request",
+    "risk_attestation",
+    "zarsuit_task_output_for_secretary",
+    "zarsuit_execution_input",
+    "secretary_routing_directive",
+)
+
+# Generic keys: common English words — require JSON-quoting context to avoid false positives.
+_SCHEMA_KEYS_GENERIC: tuple[str, ...] = (
+    "tool_call",
+    "function_call",
+    "arguments",
+    "internal_tool",
+)
+
+# Patterns generated from lists (no hand-written per-token regex → no typo risk)
+_PAT_UNAMBIGUOUS = re.compile(
+    "|".join(r"\b" + re.escape(k) + r"\b" for k in _SCHEMA_KEYS_UNAMBIGUOUS)
+)
+_PAT_GENERIC_JSON = re.compile(
+    "|".join(r'"' + re.escape(k) + r'"' for k in _SCHEMA_KEYS_GENERIC)
+)
+_PAT_XML_TAGS = re.compile(
+    r"<(system|developer|internal_schema|zarsuit_internal_schema|tool_schema|function_schema)\b",
+    re.IGNORECASE,
+)
+_PAT_LINE_PREFIX = re.compile(
+    r"^(role:\s*(system|developer)"
+    r"|zarsuit_internal_schema:"
+    r"|schema_internal:"
+    r"|internal_schema:"
+    r"|tool_schema:"
+    r"|function_schema:"
+    r"|recipient:\s*functions)",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def guard_zarsuit_schema_leak(content: str) -> GuardResult:
+    """Check output for Zarsuit internal schema leaks.
+
+    Mirrors Node outputGuard.js Q4 patterns semantically.
+    Returns GuardResult(fired=True, redactions=[...]) if any pattern matches.
+    Caller must fail-closed on fired=True — do NOT emit redacted/partial content.
+    """
+    redactions: list[str] = []
+    if _PAT_UNAMBIGUOUS.search(content):
+        redactions.append("schema_key_unambiguous")
+    if _PAT_GENERIC_JSON.search(content):
+        redactions.append("schema_key_generic_json")
+    if _PAT_XML_TAGS.search(content):
+        redactions.append("xml_tag")
+    if _PAT_LINE_PREFIX.search(content):
+        redactions.append("line_prefix")
+    return GuardResult(fired=bool(redactions), redactions=redactions)
 
 
 class ExternalAnswerDecision(StrEnum):

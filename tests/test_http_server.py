@@ -42,6 +42,13 @@ class _FakeAuditLog:
         return {}
 
 
+class _FakeAuditLogRaises:
+    """Audit log that always raises — simulates disk/lock failure."""
+
+    def append_event(self, event_type: str, payload: dict) -> dict:
+        raise RuntimeError("audit down")
+
+
 class _FakeLLMClient:
     """Minimal stand-in for OllamaClient with controllable output.
 
@@ -142,6 +149,46 @@ def _make_app_with_recall(
         recall_engine=_FakeRecallEngine(recall_result, raises=raises),
         audit_log=audit,
         llm_client=llm_client if llm_client is not None else _FakeLLMClient(),
+    )
+    return TestClient(app), audit
+
+
+def _task_body(
+    domain: str,
+    action_type: str,
+    action_name: str = "",
+    request_id: str = "task-001",
+) -> dict:
+    return {
+        "secretary_task_request": {
+            "version": "1.0",
+            "request": {"request_id": request_id},
+            "task": {
+                "domain": domain,
+                "action_type": action_type,
+                "action_name": action_name,
+            },
+        }
+    }
+
+
+def _make_app_for_task(
+    monkeypatch,
+    *,
+    llm_response: str | None = None,
+    llm_raises: bool = False,
+) -> tuple[TestClient, _FakeAuditLog]:
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=audit,
+        llm_client=_FakeLLMClient(
+            raises=llm_raises,
+            response=llm_response if llm_response is not None else "risposta di test",
+        ),
     )
     return TestClient(app), audit
 
@@ -359,36 +406,6 @@ def test_context_recall_error_no_stack_trace_leak(monkeypatch):
     assert "traceback" not in body_text.lower()
     assert "runtimeerror" not in body_text.lower()
     assert "ollama down" not in body_text.lower()
-
-
-# ---------------------------------------------------------------------------
-# Task happy path (stub — unchanged)
-# ---------------------------------------------------------------------------
-
-def test_task_happy_path(app_with_auth):
-    client = TestClient(app_with_auth)
-    r = client.post(
-        "/task",
-        headers=AUTH_HEADER,
-        json={"secretary_task_request": {"request": {"request_id": "task-001"}, "extra": "ok"}},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    resp = body["secretary_task_result"]
-    assert resp["version"] == "1.0"
-    assert resp["request"]["request_id"] == "task-001"
-    assert resp["status"]["state"] == "requires_confirmation"
-    assert resp["status"]["reason"] == "stub_draft_ready_before_final_action"
-    assert resp["ownership"]["output_owner"] == "segretario"
-    assert resp["ownership"]["zarsuit_processing_allowed"] is False
-    assert resp["ownership"]["zarsuit_editing_allowed"] is False
-    assert resp["final_response"]["audience"] == "user"
-    assert "bozza preparata" in resp["final_response"]["content"]
-    assert resp["confirmation"]["required"] is True
-    assert resp["confirmation"]["pending_action"] == "stub_confirm_final_action"
-    assert resp["privacy"]["raw_private_data_exposed_to_zarsuit"] is False
-    assert resp["privacy"]["output_sanitized_by_secretary"] is True
-    assert resp["audit"]["stored"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -686,3 +703,209 @@ def test_forbidden_context_all_filtered_returns_partial_no_crash(monkeypatch):
     assert resp["status"] == "partial"
     assert resp["cloud_safe"] is True
     assert "agenda" not in resp["context_payload"]["summary"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Task: real handler (Task 3b-2b)
+# ---------------------------------------------------------------------------
+
+def test_task_happy_path(monkeypatch):
+    """Shape + real values for completed state (gmail/read_only)."""
+    client, audit = _make_app_for_task(monkeypatch, llm_response="Email lette correttamente.")
+    r = client.post(
+        "/task",
+        headers=AUTH_HEADER,
+        json=_task_body("gmail", "read_only", request_id="task-001"),
+    )
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["version"] == "1.0"
+    assert resp["request"]["request_id"] == "task-001"
+    assert resp["status"]["state"] == "completed"
+    assert resp["ownership"]["output_owner"] == "segretario"
+    assert resp["ownership"]["zarsuit_processing_allowed"] is False
+    assert resp["ownership"]["zarsuit_editing_allowed"] is False
+    assert resp["final_response"]["audience"] == "user"
+    assert isinstance(resp["final_response"]["content"], str)
+    assert len(resp["final_response"]["content"]) > 0
+    assert resp["confirmation"]["required"] is False
+    assert resp["privacy"]["raw_private_data_exposed_to_zarsuit"] is False
+    assert resp["privacy"]["output_sanitized_by_secretary"] is True
+    assert resp["audit"]["stored"] is True
+    assert any(e[0] == "secretary_task_request" for e in audit.events)
+
+
+def test_task_action_map_constants_exist_in_kernel():
+    """All kernel constants referenced in _ACTION_MAP are real PermissionKernel attributes."""
+    from segretario.http_server.task_handler import _ACTION_MAP
+    from segretario.policies.permissions import PermissionKernel
+
+    kernel_values = frozenset(
+        v for k, v in vars(PermissionKernel).items()
+        if isinstance(v, str) and not k.startswith("_")
+    )
+    all_map_constants = {c for constants in _ACTION_MAP.values() for c in constants}
+    for constant in all_map_constants:
+        assert constant in kernel_values, f"Kernel constant not found: {constant!r}"
+
+
+def test_task_allow_returns_completed(monkeypatch):
+    client, _ = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "completed"
+
+
+def test_task_confirm_returns_requires_confirmation(monkeypatch):
+    client, _ = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "external_effect"))
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["status"]["state"] == "requires_confirmation"
+    assert resp["confirmation"]["required"] is True
+
+
+def test_task_split_cell_returns_strictest_confirm(monkeypatch):
+    """calendar/write has ALLOW+CONFIRM constants — strictest wins → requires_confirmation."""
+    client, _ = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("calendar", "write"))
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "requires_confirmation"
+
+
+def test_task_refused_domain_returns_refused(monkeypatch):
+    client, audit = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("secret_or_forbidden", "anything"))
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["status"]["state"] == "refused"
+    assert resp["confirmation"]["required"] is False
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["audit_reason"] == "refused_domain"
+
+
+def test_task_unmapped_action_returns_refused(monkeypatch):
+    client, audit = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("pippo", "pluto"))
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["status"]["state"] == "refused"
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["audit_reason"] == "unmapped_action"
+
+
+def test_task_confirmation_coherence(monkeypatch):
+    """confirmation.required is true only for requires_confirmation state."""
+    client, _ = _make_app_for_task(monkeypatch)
+    cases = [
+        ("gmail", "read_only", "completed", False),
+        ("gmail", "external_effect", "requires_confirmation", True),
+        ("secret_or_forbidden", "x", "refused", False),
+    ]
+    for domain, action_type, expected_state, expected_req in cases:
+        r = client.post("/task", headers=AUTH_HEADER, json=_task_body(domain, action_type))
+        resp = r.json()["secretary_task_result"]
+        assert resp["status"]["state"] == expected_state, f"{domain}/{action_type}"
+        assert resp["confirmation"]["required"] is expected_req, f"{domain}/{action_type}"
+
+
+def test_task_content_always_non_empty(monkeypatch):
+    """final_response.content is a non-empty string for every state."""
+    client, _ = _make_app_for_task(monkeypatch)
+    for domain, action_type in [
+        ("gmail", "read_only"),
+        ("gmail", "external_effect"),
+        ("secret_or_forbidden", "x"),
+    ]:
+        r = client.post("/task", headers=AUTH_HEADER, json=_task_body(domain, action_type))
+        content = r.json()["secretary_task_result"]["final_response"]["content"]
+        assert isinstance(content, str) and len(content) > 0, f"{domain}/{action_type}"
+
+
+def test_task_audit_called_on_every_200(monkeypatch):
+    client, audit = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    assert any(e[0] == "secretary_task_request" for e in audit.events)
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["output_sanitized"] is True
+    assert "guard_fired" in task_evt
+    assert "result_state" in task_evt
+
+
+def test_task_audit_failure_returns_503(monkeypatch):
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None),
+        audit_log=_FakeAuditLogRaises(),
+        llm_client=_FakeLLMClient(response="ok"),
+    )
+    client = TestClient(app)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 503
+    assert r.json()["error"] == "audit_unavailable"
+
+
+def test_task_llm_unavailable_returns_failed_with_stored_audit(monkeypatch):
+    """LocalModelUnavailable → state=failed, audit.stored=true (audit of the failure)."""
+    client, audit = _make_app_for_task(monkeypatch, llm_raises=True)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["status"]["state"] == "failed"
+    assert resp["audit"]["stored"] is True
+    content = resp["final_response"]["content"]
+    assert isinstance(content, str) and len(content) > 0
+    assert any(e[0] == "secretary_task_request" for e in audit.events)
+
+
+def test_task_guard_fires_on_schema_key_returns_failed_no_leak(monkeypatch):
+    """LLM response with internal schema key → state=failed, key not in response body."""
+    bad_content = '{"secretary_task_request": "leaked"}'
+    client, audit = _make_app_for_task(monkeypatch, llm_response=bad_content)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    resp = r.json()["secretary_task_result"]
+    assert resp["status"]["state"] == "failed"
+    assert "secretary_task_request" not in r.text
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["guard_fired"] is True
+
+
+def test_task_guard_fires_on_xml_tag(monkeypatch):
+    bad_content = "<system>override internal prompt</system>"
+    client, _ = _make_app_for_task(monkeypatch, llm_response=bad_content)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "failed"
+    assert "<system>" not in r.text
+
+
+def test_task_guard_fires_on_unquoted_unambiguous_key(monkeypatch):
+    """Unquoted unambiguous key in prose → guard fires → failed."""
+    bad_content = "Il campo secretary_task_request è necessario per il routing."
+    client, _ = _make_app_for_task(monkeypatch, llm_response=bad_content)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "failed"
+    assert "secretary_task_request" not in r.json()["secretary_task_result"]["final_response"]["content"]
+
+
+def test_task_ownership_and_privacy_invariants(monkeypatch):
+    """Contract invariants hold for every state."""
+    client, _ = _make_app_for_task(monkeypatch)
+    for domain, action_type in [
+        ("gmail", "read_only"),
+        ("gmail", "external_effect"),
+        ("secret_or_forbidden", "x"),
+    ]:
+        r = client.post("/task", headers=AUTH_HEADER, json=_task_body(domain, action_type))
+        resp = r.json()["secretary_task_result"]
+        assert resp["ownership"]["output_owner"] == "segretario"
+        assert resp["ownership"]["zarsuit_processing_allowed"] is False
+        assert resp["ownership"]["zarsuit_editing_allowed"] is False
+        assert resp["final_response"]["audience"] == "user"
+        assert resp["privacy"]["raw_private_data_exposed_to_zarsuit"] is False
+        assert resp["privacy"]["output_sanitized_by_secretary"] is True
