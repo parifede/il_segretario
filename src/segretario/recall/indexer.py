@@ -5,11 +5,32 @@ import logging
 from pathlib import Path
 
 from segretario.recall.chunker import H2OverlapChunker
-from segretario.recall.embedder import OllamaEmbedder, EmbedderError
+from segretario.recall.embedder import OllamaEmbedder, EmbedderError, EmbedderContextTooLongError
 from segretario.recall.models import ReindexResult
 from segretario.recall.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
+
+_ADAPTIVE_SPLIT_MAX_DEPTH = 3  # max 2^3 = 8 sub-chunks per original chunk
+
+
+def _find_split_point(text: str, mid: int) -> int:
+    """Return index of a sentence/whitespace boundary at or before mid (within 200-char window).
+
+    Priority: sentence end (. ! ? newline) > whitespace > exact mid.
+    """
+    mid = min(mid, max(0, len(text) - 1))
+    window = min(200, mid)
+    search_start = max(0, mid - window)
+    # Sentence boundary: split after the punctuation/newline
+    for i in range(mid, search_start - 1, -1):
+        if text[i] in '.!?\n' and (i + 1 >= len(text) or text[i + 1].isspace()):
+            return i + 1
+    # Whitespace: split after the space
+    for i in range(mid, search_start - 1, -1):
+        if text[i].isspace():
+            return i + 1
+    return mid
 
 
 class VaultIndexer:
@@ -77,35 +98,41 @@ class VaultIndexer:
     def _index_note(self, rel_path: str, content: str, note_hash: str, result: ReindexResult) -> None:
         """Index all chunks of a note. Clears old chunks first.
 
-        Counts the note as indexed if at least one chunk succeeds.
-        Individual chunk EmbedderErrors are logged but do NOT count as errors.
+        Counts the note as indexed if at least one chunk (or sub-chunk) succeeds.
+        EmbedderContextTooLongError triggers adaptive recursive splitting — no chunk is skipped.
+        Other EmbedderErrors are logged as WARNING and the chunk is skipped.
         """
         chunks = self._chunker.chunk(rel_path, content)
         if not chunks:
             return
 
-        # Clear old chunks for this note before inserting new ones
         self._store.delete_note(rel_path)
 
         any_indexed = False
+        store_idx = 0  # flat counter across all chunks + sub-chunks
+
         for chunk in chunks:
-            content_hash = _sha256(chunk.content)
             try:
-                embedding = self._embedder.embed(chunk.content)
-                self._store.upsert_chunk(
-                    note_path=rel_path,
-                    chunk_index=chunk.chunk_index,
-                    section_title=chunk.section_title,
-                    embedding=embedding,
-                    content_hash=content_hash,
-                    note_hash=note_hash,
-                )
-                any_indexed = True
+                pairs = self._embed_adaptive(rel_path, chunk.content, depth=0)
             except EmbedderError as exc:
                 logger.warning(
                     "Failed to embed chunk %d of %s: %s — skipping chunk",
                     chunk.chunk_index, rel_path, exc,
                 )
+                continue
+
+            for sub_text, embedding in pairs:
+                content_hash = _sha256(sub_text)
+                self._store.upsert_chunk(
+                    note_path=rel_path,
+                    chunk_index=store_idx,
+                    section_title=chunk.section_title,
+                    embedding=embedding,
+                    content_hash=content_hash,
+                    note_hash=note_hash,
+                )
+                store_idx += 1
+                any_indexed = True
 
         if any_indexed:
             result.indexed += 1
@@ -136,6 +163,35 @@ class VaultIndexer:
         except Exception as exc:
             logger.warning("update_note failed for %s: %s", note_path, exc)
             return False
+
+    def _embed_adaptive(self, note_path: str, text: str, depth: int) -> list[tuple[str, list[float]]]:
+        """Embed text, recursively splitting on context-length errors.
+
+        Returns list of (sub_text, embedding) pairs — may be >1 if splitting occurred.
+        Raises EmbedderError (non-context) so _index_note can log and skip.
+        """
+        try:
+            return [(text, self._embedder.embed(text))]
+        except EmbedderContextTooLongError as exc:
+            if depth >= _ADAPTIVE_SPLIT_MAX_DEPTH:
+                logger.warning(
+                    "Adaptive split depth %d reached for %s — skipping sub-chunk: %s",
+                    depth, note_path, exc,
+                )
+                return []
+            mid = len(text) // 2
+            split_pt = _find_split_point(text, mid)
+            left = text[:split_pt].strip()
+            right = text[split_pt:].strip()
+            if not left or not right:
+                logger.warning(
+                    "Cannot split chunk further in %s — skipping: %s", note_path, exc
+                )
+                return []
+            return (
+                self._embed_adaptive(note_path, left, depth + 1)
+                + self._embed_adaptive(note_path, right, depth + 1)
+            )
 
     def _scan_vault(self) -> list[Path]:
         """Return all .md files in vault, excluding skip_paths."""

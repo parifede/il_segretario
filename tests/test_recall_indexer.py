@@ -281,3 +281,39 @@ def test_indexer_uses_note_hash_for_skip(tmp_path: Path):
     assert second.indexed == 0
     # embedder called only during first run
     assert embedder.embed.call_count == first.indexed  # called once per chunk in first run
+
+
+# ---------------------------------------------------------------------------
+# test: adaptive split on context-length error — zero chunks lost
+# ---------------------------------------------------------------------------
+
+def test_indexer_adaptive_split_zero_chunks_lost(tmp_path: Path):
+    """Chunks that exceed context window are split and re-embedded — zero chunks lost."""
+    from segretario.recall.embedder import EmbedderContextTooLongError
+    from segretario.recall.chunker import H2OverlapChunker
+
+    # Chunker cap=800 so each chunk is ≤800 chars, but mock threshold=400 → all chunks fail first try
+    content = "# Dense Block\n" + "W" * 2000
+    (tmp_path / "dense.md").write_text(content, encoding="utf-8")
+
+    embedder = MagicMock(spec=OllamaEmbedder)
+
+    def embed_side_effect(text: str) -> list[float]:
+        if len(text) > 400:
+            raise EmbedderContextTooLongError(f"context exceeded: {len(text)} chars")
+        return [0.1] * 1024
+
+    embedder.embed.side_effect = embed_side_effect
+
+    store = _make_store()
+    chunker = H2OverlapChunker(max_chunk_chars=800)
+    indexer = VaultIndexer(vault_path=tmp_path, store=store, embedder=embedder, chunker=chunker)
+
+    result = indexer.reindex()
+
+    # Note fully indexed — zero errors, zero skips
+    assert result.indexed == 1
+    assert result.errors == []
+    # All sub-chunks stored (embed called multiple times per original chunk)
+    assert "dense.md" in store.list_indexed_paths()
+    assert embedder.embed.call_count > 1
