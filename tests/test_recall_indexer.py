@@ -212,7 +212,7 @@ def test_indexer_handles_single_note_embed_failure(tmp_path: Path):
 
 def test_indexer_counts_note_indexed_not_chunks(tmp_path: Path):
     """indexed counter increments per note, not per chunk."""
-    # Create a note that produces multiple chunks (> CHUNK_TARGET_SIZE = 1500 chars)
+    # Create a note that produces multiple chunks (> CHUNK_MAX_CHARS_DEFAULT = 1000 chars)
     content = "# Big Note\n" + "X" * 5000
     (tmp_path / "big.md").write_text(content, encoding="utf-8")
 
