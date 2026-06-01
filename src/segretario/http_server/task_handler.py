@@ -10,6 +10,7 @@ from segretario.flow02.character_store import CharacterStore
 from segretario.flow02.recall_engine import RecallEngine
 from segretario.http_server.context_handler import _strip_recall_headers
 from segretario.http_server.models import validate_safe_request_id
+from segretario.policies.grounding_guard import GroundingGuardResult, fence_grounding, guard_grounding
 from segretario.policies.output_guard import guard_zarsuit_schema_leak, sanitize_user_output
 from segretario.policies.permissions import PermissionDecision, PermissionKernel as PK
 from segretario.policies.privacy import project_private_context
@@ -113,27 +114,31 @@ def _decide(domain: str, action_type: str) -> tuple[str, str, str, str]:
     return "refused", "kernel_denied", mapped_action, kernel_decision
 
 
-def _ground_with_recall(recall_engine: RecallEngine, query: str) -> str | None:
-    """Run recall + strip + privacy projection for task grounding.
+def _ground_with_recall(recall_engine: RecallEngine, query: str) -> GroundingGuardResult:
+    """Run recall + strip + privacy projection + injection guard for task grounding.
 
-    Best-effort: returns None on any failure so the caller can proceed without grounding.
+    Best-effort: returns GroundingGuardResult with clean_text=None on any failure.
     """
+    _no_grounding = GroundingGuardResult(clean_text=None, injection_detected=False, segments_stripped=0)
     try:
         raw = recall_engine.recall_simple(query, max_tokens=4000)
     except Exception as exc:
         logger.warning("recall failed for task grounding: %s", exc)
-        return None
+        return _no_grounding
     if not raw:
-        return None
+        return _no_grounding
     stripped = _strip_recall_headers(raw)
     if not stripped:
-        return None
+        return _no_grounding
     try:
         projection = project_private_context(stripped)
-        return sanitize_user_output(projection.text) or None
+        sanitized = sanitize_user_output(projection.text) or None
     except Exception as exc:
         logger.warning("privacy projection failed for task grounding: %s", exc)
-        return sanitize_user_output(stripped) or None
+        sanitized = sanitize_user_output(stripped) or None
+    if not sanitized:
+        return _no_grounding
+    return guard_grounding(sanitized)
 
 
 def _generate_content(
@@ -150,7 +155,7 @@ def _generate_content(
     task_desc = f"{domain}/{action_type}" + (f" ({action_name})" if action_name else "")
 
     context_block = (
-        f"Materiale di riferimento dal Vault:\n{grounding}\n\n"
+        fence_grounding(grounding) + "\n\n"
     ) if grounding else ""
 
     if state == "requires_confirmation":
@@ -230,6 +235,8 @@ def build_task_response_real(
     kernel_decision = "none"
     raw_content = _FAILED_CONTENT_TEMPLATE
     guard_fired = False
+    injection_detected = False
+    segments_stripped = 0
 
     try:
         task = envelope.get("task", {})
@@ -250,7 +257,10 @@ def build_task_response_real(
         if state in ("completed", "requires_confirmation"):
             grounding = None
             if private_data_needed and recall_engine is not None:
-                grounding = _ground_with_recall(recall_engine, recall_query)
+                grounding_result = _ground_with_recall(recall_engine, recall_query)
+                grounding = grounding_result.clean_text
+                injection_detected = grounding_result.injection_detected
+                segments_stripped = grounding_result.segments_stripped
             raw_content = _generate_content(
                 llm_client, character_store, domain, action_type, action_name, state,
                 grounding=grounding,
@@ -286,6 +296,8 @@ def build_task_response_real(
             "output_sanitized": True,
             "guard_fired": guard_fired,
             "audit_reason": reason,
+            "injection_detected": injection_detected,
+            "segments_stripped": segments_stripped,
         })
     except Exception as exc:
         logger.error("audit write failed for task %s: %s", request_id, exc)
