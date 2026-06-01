@@ -4,7 +4,7 @@ import re
 from segretario.recall.models import Chunk
 
 
-CHUNK_TARGET_SIZE = 900    # kept for backward-compat with existing tests
+CHUNK_TARGET_SIZE = 900    # exported constant used by tests
 CHUNK_OVERLAP_SIZE = 200
 CHUNK_MAX_CHARS_DEFAULT = 1000  # hard cap — ~250 tokens, safe margin under mxbai 512-tok limit
 
