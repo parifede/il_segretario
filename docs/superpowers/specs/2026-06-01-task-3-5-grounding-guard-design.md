@@ -12,7 +12,7 @@ Il grounding (contenuto del vault recuperato dal recall) viene iniettato nel pro
 | Handler | Punto di iniezione | LLM destinatario |
 |---|---|---|
 | `task_handler._generate_content()` | `context_block` nel prompt | Modello task (Ollama) |
-| `context_handler._project()` | `prose` passato a `_synthesize_with_gemma()` | Gemma locale |
+| `context_handler._project()` | `prose` passato a `_synthesize_with_llm()` | modello locale (config-driven) |
 
 Se una nota nel vault contiene un payload di prompt injection, il modello locale può essere steered. I backstop esistenti (gate di conferma, projection, output_guard Q4, self/local-only) coprono altri livelli — il residuo aperto è lo **steering del modello via grounding**.
 
@@ -170,13 +170,13 @@ else:
     prose = guard_result.clean_text
 ```
 
-### 5.2 Sintesi con Gemma — fenced
+### 5.2 Sintesi locale — fenced
 
 Solo quando `guard_result.clean_text` non è `None` (cioè `all_filtered` non è stato impostato a `True` dal guard):
 
 ```python
 # prose è già stato aggiornato a guard_result.clean_text (non None)
-synthesis_text = _synthesize_with_gemma(llm_client, fence_grounding(prose))
+synthesis_text = _synthesize_with_llm(llm_client, fence_grounding(prose))
 ```
 
 Se `all_filtered = True` (da guard o da `_filter_forbidden_chunks`), il blocco di sintesi non deve partire. `fence_grounding(None)` non deve mai essere chiamata.
@@ -250,7 +250,7 @@ Valori di default (usati quando il branch recall è `None` o `all_filtered` prim
 
 ### 7.3 `tests/test_context_handler.py` (append)
 
-- Grounding con payload → guard → audit `injection_detected=True`; Gemma non riceve il payload nel prompt
+- Grounding con payload → guard → audit `injection_detected=True`; il modello locale non riceve il payload nel prompt
 - Grounding tutto strippato → branch `all_filtered`, status `partial`
 
 ### 7.4 `smoke_grounding_guard.py` (nuovo, end-to-end)

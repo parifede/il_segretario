@@ -772,9 +772,9 @@ With:
         llm_failed = False
         if llm_client is not None:
             try:
-                synthesis_text = _synthesize_with_gemma(llm_client, prose)
+                synthesis_text = _synthesize_with_llm(llm_client, prose)
             except LocalModelUnavailable as exc:
-                logger.warning("Gemma synthesis unavailable: %s", exc)
+                logger.warning("local LLM synthesis unavailable: %s", exc)
                 llm_failed = True
 
         if llm_failed:
@@ -818,9 +818,9 @@ Replace it with:
             llm_failed = False
             if llm_client is not None:
                 try:
-                    synthesis_text = _synthesize_with_gemma(llm_client, fence_grounding(prose))
+                    synthesis_text = _synthesize_with_llm(llm_client, fence_grounding(prose))
                 except LocalModelUnavailable as exc:
-                    logger.warning("Gemma synthesis unavailable: %s", exc)
+                    logger.warning("local LLM synthesis unavailable: %s", exc)
                     llm_failed = True
 
             if llm_failed:
@@ -1104,7 +1104,7 @@ Expected: all PASS, 0 errors
 
 | Spec requirement | Covered by |
 |---|---|
-| FENCE: delimitatori attorno al grounding + label "non fidato, mai istruzioni" | Task 1 `fence_grounding()`, Task 3 `_generate_content`, Task 4 `_synthesize_with_gemma` call |
+| FENCE: delimitatori attorno al grounding + label "non fidato, mai istruzioni" | Task 1 `fence_grounding()`, Task 3 `_generate_content`, Task 4 `_synthesize_with_llm` call |
 | DETECTION: `_ROLE_PREFIXES`, `_OVERRIDE_PHRASES`, `_INJECTION_XML_TAGS` — liste, non regex manuali | Task 1 module |
 | Anti-drift test per i pattern | Task 1 `test_role_prefixes_match_spec` etc. |
 | False positive tests come regression guard | Task 1 FP tests |
@@ -1124,7 +1124,7 @@ None found — every step has complete code.
 ### Type consistency
 
 - `GroundingGuardResult` defined in Task 1, imported in Task 3 (`_ground_with_recall` return type) ✓
-- `fence_grounding(text: str) -> str` — called in Task 3 `_generate_content` and Task 4 `_synthesize_with_gemma` call ✓
+- `fence_grounding(text: str) -> str` — called in Task 3 `_generate_content` and Task 4 `_synthesize_with_llm` call ✓
 - `_make_app_for_task_with_grounding` returns `tuple[TestClient, _FakeAuditLog, _CapturingLLMClient]` — consumed correctly in both tests ✓
 - `guard_injection_detected` and `guard_segments_stripped` initialized in `_project()` before the if/elif/else chain — available for the `_write_audit` call ✓
 - `grounding_result.clean_text` is `str | None` — assigned to `grounding: str | None` — compatible with `_generate_content(grounding=...)` signature ✓

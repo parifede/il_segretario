@@ -89,7 +89,7 @@ def _map_intent(raw: str | None) -> IntentType:
         return IntentType.CONVERSATIONAL
 
 
-def _synthesize_with_gemma(llm_client: OllamaClient, prose: str) -> str:
+def _synthesize_with_llm(llm_client: OllamaClient, prose: str) -> str:
     """Call local LLM for a concise privacy-safe synthesis.
 
     Raises LocalModelUnavailable on failure.
@@ -241,9 +241,9 @@ def _project(
             llm_failed = False
             if llm_client is not None:
                 try:
-                    synthesis_text = _synthesize_with_gemma(llm_client, fence_grounding(prose))
+                    synthesis_text = _synthesize_with_llm(llm_client, fence_grounding(prose))
                 except LocalModelUnavailable as exc:
-                    logger.warning("Gemma synthesis unavailable: %s", exc)
+                    logger.warning("local LLM synthesis unavailable: %s", exc)
                     llm_failed = True
 
             if llm_failed:

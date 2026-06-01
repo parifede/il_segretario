@@ -644,10 +644,10 @@ def test_localhost_string_accepted():
 
 
 # ---------------------------------------------------------------------------
-# Context: Gemma synthesis integration
+# Context: local LLM synthesis integration
 # ---------------------------------------------------------------------------
 
-def test_context_gemma_down_returns_partial(monkeypatch):
+def test_context_local_llm_down_returns_partial(monkeypatch):
     """LocalModelUnavailable from LLM → status=partial, cloud_safe=True, no crash."""
     client, _ = _make_app_with_recall(
         monkeypatch,
