@@ -7,9 +7,12 @@ from typing import Any, Iterable
 from segretario.audit.hash_chain import AuditLog
 from segretario.connectors.ollama_client import LocalModelUnavailable, OllamaClient
 from segretario.flow02.character_store import CharacterStore
+from segretario.flow02.recall_engine import RecallEngine
+from segretario.http_server.context_handler import _strip_recall_headers
 from segretario.http_server.models import validate_safe_request_id
 from segretario.policies.output_guard import guard_zarsuit_schema_leak, sanitize_user_output
 from segretario.policies.permissions import PermissionDecision, PermissionKernel as PK
+from segretario.policies.privacy import project_private_context
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +70,13 @@ _DECISION_ORDER: dict[str, int] = {
 
 _FAILED_CONTENT_TEMPLATE = "Non è stato possibile completare il task. Riprova più tardi."
 _REFUSED_CONTENT_TEMPLATE = "Mi dispiace, non posso eseguire questo tipo di operazione."
-_TASK_SYSTEM_FRAMING = "Prepara la risposta per il task utente richiesto."
+
+# System framing: voice only — no privacy disclaimers (guard handles that).
+_TASK_SYSTEM_FRAMING = (
+    "Prepara la risposta per il task utente richiesto. "
+    "Usa SOLO il contesto fornito; se assente o insufficiente, dillo. "
+    "Non inventare mai dati del Vault (note, progetti, date, contatti)."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +88,11 @@ def _strictest(decisions: Iterable[PermissionDecision]) -> PermissionDecision:
 
 
 def _decide(domain: str, action_type: str) -> tuple[str, str, str, str]:
-    """Return (state, audit_reason, mapped_action, kernel_decision)."""
+    """Return (state, audit_reason, mapped_action, kernel_decision).
+
+    mapped_action is the routing key 'domain/action_type' (not the first kernel
+    constant) so split-cell audit entries are readable without looking up the map.
+    """
     if domain in _REFUSED_DOMAINS:
         return "refused", "refused_domain", "none", "none"
 
@@ -88,7 +101,7 @@ def _decide(domain: str, action_type: str) -> tuple[str, str, str, str]:
         return "refused", "unmapped_action", "none", "none"
 
     decision = _strictest(PK.decision_for(c) for c in constants)
-    mapped_action = constants[0]
+    mapped_action = f"{domain}/{action_type}"  # routing key, not first kernel constant
     kernel_decision = str(decision)
 
     if decision == PermissionDecision.ALLOW:
@@ -99,6 +112,29 @@ def _decide(domain: str, action_type: str) -> tuple[str, str, str, str]:
     return "refused", "kernel_denied", mapped_action, kernel_decision
 
 
+def _ground_with_recall(recall_engine: RecallEngine, query: str) -> str | None:
+    """Run recall + strip + privacy projection for task grounding.
+
+    Best-effort: returns None on any failure so the caller can proceed without grounding.
+    """
+    try:
+        raw = recall_engine.recall_simple(query, max_tokens=4000)
+    except Exception as exc:
+        logger.warning("recall failed for task grounding: %s", exc)
+        return None
+    if not raw:
+        return None
+    stripped = _strip_recall_headers(raw)
+    if not stripped:
+        return None
+    try:
+        projection = project_private_context(stripped)
+        return sanitize_user_output(projection.text) or None
+    except Exception as exc:
+        logger.warning("privacy projection failed for task grounding: %s", exc)
+        return sanitize_user_output(stripped) or None
+
+
 def _generate_content(
     llm_client: OllamaClient,
     character_store: CharacterStore,
@@ -106,16 +142,26 @@ def _generate_content(
     action_type: str,
     action_name: str,
     state: str,
+    *,
+    grounding: str | None = None,
 ) -> str:
     system = character_store.identity() + "\n" + _TASK_SYSTEM_FRAMING
     task_desc = f"{domain}/{action_type}" + (f" ({action_name})" if action_name else "")
+
+    context_block = f"Contesto dal Vault:\n{grounding}\n\n" if grounding else ""
+
     if state == "requires_confirmation":
         prompt = (
+            f"{context_block}"
             f"Task richiesto: {task_desc}\n"
             "Prepara una bozza e spiega che serve la conferma dell'utente prima di procedere."
         )
     else:
-        prompt = f"Task richiesto: {task_desc}\nPrepara la risposta o il risultato del task."
+        prompt = (
+            f"{context_block}"
+            f"Task richiesto: {task_desc}\n"
+            "Prepara la risposta o il risultato del task."
+        )
     return llm_client.generate(prompt, system=system)
 
 
@@ -159,6 +205,7 @@ def build_task_response_real(
     audit_log: AuditLog,
     llm_client: OllamaClient,
     character_store: CharacterStore,
+    recall_engine: RecallEngine | None = None,
 ) -> dict[str, Any]:
     """Build a real secretary_task_result from the secretary_task_request inner dict.
 
@@ -187,11 +234,23 @@ def build_task_response_real(
         action_type = str(task.get("action_type", "unknown")).strip() or "unknown"
         action_name = str(task.get("action_name", "")).strip()
 
+        # Recall grounding fields (correction 1)
+        privacy_req = envelope.get("privacy", {}) or {}
+        private_data_needed = bool(privacy_req.get("private_data_needed"))
+        user_req = envelope.get("user_request", {}) or {}
+        user_visible_goal = str(user_req.get("user_visible_goal", "")).strip()
+        original_input = str(user_req.get("original_input", "")).strip()
+        recall_query = user_visible_goal or original_input or action_name or f"{domain}/{action_type}"
+
         state, reason, mapped_action, kernel_decision = _decide(domain, action_type)
 
         if state in ("completed", "requires_confirmation"):
+            grounding = None
+            if private_data_needed and recall_engine is not None:
+                grounding = _ground_with_recall(recall_engine, recall_query)
             raw_content = _generate_content(
-                llm_client, character_store, domain, action_type, action_name, state
+                llm_client, character_store, domain, action_type, action_name, state,
+                grounding=grounding,
             )
             guard_result = guard_zarsuit_schema_leak(raw_content)
             if guard_result.fired:

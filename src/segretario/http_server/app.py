@@ -121,6 +121,7 @@ def create_app(
                 _audit,
                 _llm,
                 _character,
+                recall_engine=_recall,
             )
             return JSONResponse(result)
         except ValueError:

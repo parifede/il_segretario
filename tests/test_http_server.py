@@ -49,6 +49,32 @@ class _FakeAuditLogRaises:
         raise RuntimeError("audit down")
 
 
+class _CapturingLLMClient:
+    """LLM client that records the last prompt/system it received."""
+
+    def __init__(self, response: str = "risposta catturata") -> None:
+        self._response = response
+        self.last_prompt: str | None = None
+        self.last_system: str | None = None
+
+    def generate(self, prompt: str, system: str | None = None) -> str:
+        self.last_prompt = prompt
+        self.last_system = system
+        return self._response
+
+
+class _TrackingRecallEngine:
+    """Recall engine that tracks how many times recall_simple is called."""
+
+    def __init__(self, result: str | None) -> None:
+        self._result = result
+        self.call_count = 0
+
+    def recall_simple(self, query: str, max_tokens: int = 4000) -> str | None:  # noqa: ARG002
+        self.call_count += 1
+        return self._result
+
+
 class _FakeLLMClient:
     """Minimal stand-in for OllamaClient with controllable output.
 
@@ -909,3 +935,92 @@ def test_task_ownership_and_privacy_invariants(monkeypatch):
         assert resp["final_response"]["audience"] == "user"
         assert resp["privacy"]["raw_private_data_exposed_to_zarsuit"] is False
         assert resp["privacy"]["output_sanitized_by_secretary"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task: audit routing key (correction 3)
+# ---------------------------------------------------------------------------
+
+def test_task_audit_logs_routing_key_not_kernel_constant(monkeypatch):
+    """mapped_action in audit is 'domain/action_type', not first kernel constant."""
+    client, audit = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["mapped_action"] == "gmail/read_only"
+
+
+def test_task_audit_routing_key_for_split_cell(monkeypatch):
+    """Split cell (calendar/write) logs routing key, not first constant (calendar.create)."""
+    client, audit = _make_app_for_task(monkeypatch)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("calendar", "write"))
+    assert r.status_code == 200
+    task_evt = next(e[1] for e in audit.events if e[0] == "secretary_task_request")
+    assert task_evt["mapped_action"] == "calendar/write"
+
+
+# ---------------------------------------------------------------------------
+# Task: recall grounding (correction 1)
+# ---------------------------------------------------------------------------
+
+def test_task_grounding_injects_vault_content_into_prompt(monkeypatch):
+    """private_data_needed=True → recall content appears in LLM prompt."""
+    vault_content = "Nota su progetto X: scadenza il 15 luglio."
+    llm = _CapturingLLMClient(response="risposta con contesto")
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(vault_content),
+        audit_log=audit,
+        llm_client=llm,
+    )
+    client = TestClient(app)
+    body = _task_body("vault", "read_only")
+    body["secretary_task_request"]["privacy"] = {"private_data_needed": True}
+    body["secretary_task_request"]["user_request"] = {"user_visible_goal": "trovare note su X"}
+    r = client.post("/task", headers=AUTH_HEADER, json=body)
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "completed"
+    assert llm.last_prompt is not None
+    assert "progetto X" in llm.last_prompt
+
+
+def test_task_no_recall_when_private_data_not_needed(monkeypatch):
+    """private_data_needed absent/false → recall_simple is never called."""
+    tracker = _TrackingRecallEngine(None)
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=tracker,
+        audit_log=audit,
+        llm_client=_FakeLLMClient(response="ok"),
+    )
+    client = TestClient(app)
+    r = client.post("/task", headers=AUTH_HEADER, json=_task_body("gmail", "read_only"))
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "completed"
+    assert tracker.call_count == 0
+
+
+def test_task_grounding_recall_failure_still_succeeds(monkeypatch):
+    """If recall raises when private_data_needed=True, task succeeds with no grounding (best-effort)."""
+    monkeypatch.setenv("IL_SEGRETARIO_HTTP_TOKEN", "test-token-123")
+    settings = Settings(http_server=HTTPServerSettings(enabled=True, host="127.0.0.1", port=8722))
+    audit = _FakeAuditLog()
+    app = create_app(
+        settings,
+        recall_engine=_FakeRecallEngine(None, raises=True),
+        audit_log=audit,
+        llm_client=_FakeLLMClient(response="fallback senza contesto"),
+    )
+    client = TestClient(app)
+    body = _task_body("vault", "read_only")
+    body["secretary_task_request"]["privacy"] = {"private_data_needed": True}
+    body["secretary_task_request"]["user_request"] = {"user_visible_goal": "cerca note"}
+    r = client.post("/task", headers=AUTH_HEADER, json=body)
+    assert r.status_code == 200
+    assert r.json()["secretary_task_result"]["status"]["state"] == "completed"
