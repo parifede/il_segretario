@@ -164,6 +164,22 @@ class RecallEngine:
             return None
         return result.content
 
+    def recall_for_grounding(self, query: str, max_tokens: int = 4000) -> str | None:
+        """Grounding-specific recall: applies grounding_top_k and grounding_min_score from settings.
+
+        Defaults are no-op (grounding_top_k=None → default_k, grounding_min_score=0.0 → no filter).
+        Does NOT trigger wizards — returns None silently when a wizard is required.
+        """
+        effective_k = self._settings.grounding_top_k or self._settings.default_k
+        result = self.recall(query, k=effective_k, max_tokens=max_tokens)
+        if result.wizard_required is not None:
+            return None
+        min_score = self._settings.grounding_min_score
+        if result.hits and min_score > 0.0:
+            filtered = [h for h in result.hits if h.score >= min_score]
+            return _hits_to_text(filtered) if filtered else None
+        return result.content
+
     def keyword_search(self, query: str, max_tokens: int = 4000) -> str | None:
         """Explicit keyword search. Called by Task 3 when user chooses
         'Non ora' (ACTIVATION wizard) or 'Procedi keyword' (DOWNGRADE wizard).

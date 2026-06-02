@@ -30,6 +30,11 @@ class _FakeRecallEngine:
             raise RuntimeError("ollama down")
         return self._result
 
+    def recall_for_grounding(self, query: str, max_tokens: int = 4000) -> str | None:  # noqa: ARG002
+        if self._raises:
+            raise RuntimeError("ollama down")
+        return self._result
+
 
 class _FakeAuditLog:
     """In-memory audit log for test assertions."""
@@ -64,13 +69,17 @@ class _CapturingLLMClient:
 
 
 class _TrackingRecallEngine:
-    """Recall engine that tracks how many times recall_simple is called."""
+    """Recall engine that tracks how many times recall_for_grounding is called."""
 
     def __init__(self, result: str | None) -> None:
         self._result = result
         self.call_count = 0
 
     def recall_simple(self, query: str, max_tokens: int = 4000) -> str | None:  # noqa: ARG002
+        self.call_count += 1
+        return self._result
+
+    def recall_for_grounding(self, query: str, max_tokens: int = 4000) -> str | None:  # noqa: ARG002
         self.call_count += 1
         return self._result
 

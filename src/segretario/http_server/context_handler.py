@@ -28,7 +28,11 @@ _SYNTHESIS_SYSTEM = (
     "In seconda persona rivolto a Zarsuit, digli in modo generale di cosa vi state occupando e a che punto siete. "
     "Resta sul generale, senza dettagli precisi. "
     "Scrivi direttamente il contesto, nient'altro. "
-    "Italiano, prosa semplice, 2-3 frasi."
+    "Italiano, prosa semplice, 2-3 frasi. "
+    "Attieniti SOLO a ciò che il materiale di riferimento dice esplicitamente. "
+    "Non collegare tra loro elementi che il materiale non collega; non dedurre date, esiti o eventi non presenti nel testo. "
+    "Se il materiale è frammentario, incoerente o non risponde alla richiesta, "
+    "DICHIARALO ('il materiale non contiene questa informazione') invece di costruire un ponte plausibile."
 )
 
 
@@ -177,7 +181,7 @@ def _project(
     recall_content: str | None = None
     recall_error = False
     try:
-        recall_content = recall_engine.recall_simple(query, max_tokens=4_000)
+        recall_content = recall_engine.recall_for_grounding(query, max_tokens=4_000)
     except Exception as exc:
         logger.warning("recall_simple failed: %s", exc)
         recall_error = True

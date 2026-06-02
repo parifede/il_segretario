@@ -125,9 +125,16 @@ class RecallSettings(BaseModel):
     state_path: Path = Field(default_factory=lambda: _root() / "state" / "recall_last_run.json")
     default_k: int = 5
     reindex_threshold_minutes: int = 15
-    skip_paths: list[str] = Field(default_factory=lambda: ["raw/elaborati"])
+    skip_paths: list[str] = Field(default_factory=lambda: [
+        "raw/elaborati",
+        "raw/extracted",
+        "README.md",
+    ])
     embedder_health_check_timeout_seconds: int = 5
     embedder_max_chunk_chars: int = 1000  # hard cap per embedder token window (mxbai: 512 tok; 1000 chars ≈ 250 tok)
+    # Grounding quality knobs — defaults are no-op (behaviour unchanged until tuned)
+    grounding_top_k: int | None = None  # None → use default_k; set to cap chunks used for grounding
+    grounding_min_score: float = 0.0    # 0.0 → no filter; set e.g. 0.4 to drop low-relevance chunks
 
 
 class Settings(BaseModel):

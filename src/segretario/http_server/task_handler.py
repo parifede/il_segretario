@@ -74,9 +74,14 @@ _REFUSED_CONTENT_TEMPLATE = "Mi dispiace, non posso eseguire questo tipo di oper
 
 # System framing: voice only — no privacy disclaimers (guard handles them downstream).
 _TASK_SYSTEM_FRAMING = (
-    "Rispondi al task in italiano naturale e conciso. "
+    "Rispondi in italiano naturale e conciso all'obiettivo dell'utente. "
+    "Non citare mai etichette tecniche interne (come 'vault/read_only', 'Task:') nella risposta. "
     "Il materiale di riferimento, se presente, va usato per informare la risposta — "
     "non va narrato né ripetuto. "
+    "Attieniti SOLO a ciò che il materiale di riferimento dice esplicitamente. "
+    "Non collegare tra loro elementi che il materiale non collega; non dedurre date, esiti o eventi non presenti nel testo. "
+    "Se il materiale è frammentario, incoerente o non risponde alla richiesta, "
+    "DICHIARALO ('il materiale non contiene questa informazione') invece di costruire un ponte plausibile. "
     "Per i dati non disponibili scrivi '[da definire]', non inventare nomi, date o dettagli."
 )
 
@@ -121,7 +126,7 @@ def _ground_with_recall(recall_engine: RecallEngine, query: str) -> GroundingGua
     """
     _no_grounding = GroundingGuardResult(clean_text=None, injection_detected=False, segments_stripped=0)
     try:
-        raw = recall_engine.recall_simple(query, max_tokens=4000)
+        raw = recall_engine.recall_for_grounding(query, max_tokens=4000)
     except Exception as exc:
         logger.warning("recall failed for task grounding: %s", exc)
         return _no_grounding
@@ -150,24 +155,26 @@ def _generate_content(
     state: str,
     *,
     grounding: str | None = None,
+    goal: str = "",
 ) -> str:
     system = character_store.identity() + "\n" + _TASK_SYSTEM_FRAMING
-    task_desc = f"{domain}/{action_type}" + (f" ({action_name})" if action_name else "")
 
     context_block = (
         fence_grounding(grounding) + "\n\n"
     ) if grounding else ""
 
+    objective = goal or action_name or f"{domain}/{action_type}"
+
     if state == "requires_confirmation":
         prompt = (
             f"{context_block}"
-            f"Task: {task_desc}\n\n"
+            f"Obiettivo: {objective}\n\n"
             "Prepara una bozza concisa e indica che serve la conferma dell'utente prima di procedere."
         )
     else:
         prompt = (
             f"{context_block}"
-            f"Task: {task_desc}\n\n"
+            f"Obiettivo: {objective}\n\n"
             "Prepara la risposta."
         )
     return llm_client.generate(prompt, system=system)
@@ -264,6 +271,7 @@ def build_task_response_real(
             raw_content = _generate_content(
                 llm_client, character_store, domain, action_type, action_name, state,
                 grounding=grounding,
+                goal=recall_query,
             )
             guard_result = guard_zarsuit_schema_leak(raw_content)
             if guard_result.fired:

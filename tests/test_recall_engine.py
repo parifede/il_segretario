@@ -143,3 +143,117 @@ def test_recall_engine_backward_compat_no_settings(tmp_path: Path):
 
     # Default RecallSettings has enabled=False and user_dismissed_wizard=False
     assert result.state == RecallEngineState.SEMANTIC_DISABLED_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Task 3.6 — grounding knobs: RecallSettings defaults + recall_for_grounding
+# ---------------------------------------------------------------------------
+
+def test_recall_settings_grounding_knob_defaults():
+    """grounding_top_k and grounding_min_score must have no-op defaults."""
+    from segretario.config.settings import RecallSettings as RS
+    s = RS()
+    assert s.grounding_top_k is None, "grounding_top_k default must be None (no-op)"
+    assert s.grounding_min_score == 0.0, "grounding_min_score default must be 0.0 (no-op)"
+
+
+def test_recall_for_grounding_returns_none_when_wizard_required(tmp_path: Path):
+    """recall_for_grounding must return None silently when wizard is required."""
+    index_path = _make_index(tmp_path)
+    settings = RecallSettings(enabled=False, user_dismissed_wizard=False)
+    engine = RecallEngine(index_path=index_path, recall_settings=settings)
+
+    result = engine.recall_for_grounding("test query")
+
+    assert result is None
+
+
+def test_recall_for_grounding_noop_defaults_same_as_recall_simple(tmp_path: Path):
+    """With default knobs (top_k=None, min_score=0.0), recall_for_grounding == recall_simple output."""
+    index_path = _make_index(tmp_path)
+    settings = RecallSettings(
+        enabled=True,
+        db_path=tmp_path / "state" / "recall.sqlite",
+        grounding_top_k=None,
+        grounding_min_score=0.0,
+    )
+    engine = RecallEngine(index_path=index_path, recall_settings=settings)
+
+    hits = [
+        RecallHit(note_path="note.md", chunk_index=0, section_title=None, score=0.8, content_preview="contenuto A"),
+        RecallHit(note_path="note.md", chunk_index=1, section_title=None, score=0.6, content_preview="contenuto B"),
+    ]
+    with patch.object(engine._state_machine, "evaluate", return_value=(RecallEngineState.SEMANTIC_READY, None, {})):
+        engine._retriever = MagicMock()
+        engine._retriever.search.return_value = hits
+
+        result_grounding = engine.recall_for_grounding("query")
+        result_simple = engine.recall_simple("query")
+
+    assert result_grounding == result_simple
+
+
+def test_recall_for_grounding_top_k_limits_search_k(tmp_path: Path):
+    """grounding_top_k is passed as k to the retriever search."""
+    index_path = _make_index(tmp_path)
+    settings = RecallSettings(
+        enabled=True,
+        db_path=tmp_path / "state" / "recall.sqlite",
+        grounding_top_k=2,
+    )
+    engine = RecallEngine(index_path=index_path, recall_settings=settings)
+
+    mock_retriever = MagicMock()
+    mock_retriever.search.return_value = [
+        RecallHit(note_path="n.md", chunk_index=0, section_title=None, score=0.9, content_preview="hit 1"),
+    ]
+    with patch.object(engine._state_machine, "evaluate", return_value=(RecallEngineState.SEMANTIC_READY, None, {})):
+        engine._retriever = mock_retriever
+        engine.recall_for_grounding("query")
+
+    mock_retriever.search.assert_called_once_with("query", k=2)
+
+
+def test_recall_for_grounding_min_score_filters_low_score_hits(tmp_path: Path):
+    """Hits below grounding_min_score must be excluded from the output."""
+    index_path = _make_index(tmp_path)
+    settings = RecallSettings(
+        enabled=True,
+        db_path=tmp_path / "state" / "recall.sqlite",
+        grounding_min_score=0.7,
+    )
+    engine = RecallEngine(index_path=index_path, recall_settings=settings)
+
+    hits = [
+        RecallHit(note_path="n.md", chunk_index=0, section_title=None, score=0.9, content_preview="alta rilevanza"),
+        RecallHit(note_path="n.md", chunk_index=1, section_title=None, score=0.4, content_preview="bassa rilevanza"),
+    ]
+    with patch.object(engine._state_machine, "evaluate", return_value=(RecallEngineState.SEMANTIC_READY, None, {})):
+        engine._retriever = MagicMock()
+        engine._retriever.search.return_value = hits
+        result = engine.recall_for_grounding("query")
+
+    assert result is not None
+    assert "alta rilevanza" in result
+    assert "bassa rilevanza" not in result
+
+
+def test_recall_for_grounding_all_below_min_score_returns_none(tmp_path: Path):
+    """If all hits are below min_score, recall_for_grounding returns None."""
+    index_path = _make_index(tmp_path)
+    settings = RecallSettings(
+        enabled=True,
+        db_path=tmp_path / "state" / "recall.sqlite",
+        grounding_min_score=0.9,
+    )
+    engine = RecallEngine(index_path=index_path, recall_settings=settings)
+
+    hits = [
+        RecallHit(note_path="n.md", chunk_index=0, section_title=None, score=0.3, content_preview="troppo irrilevante"),
+    ]
+    with patch.object(engine._state_machine, "evaluate", return_value=(RecallEngineState.SEMANTIC_READY, None, {})):
+        engine._retriever = MagicMock()
+        engine._retriever.search.return_value = hits
+        result = engine.recall_for_grounding("query")
+
+    assert result is None
